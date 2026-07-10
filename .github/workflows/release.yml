@@ -1,0 +1,80 @@
+name: release
+
+# Cut a release by pushing a tag: `git tag v5.7.0-bcachefs1 && git push --tags`.
+# The packages are (re)built and verified by the same pipeline CI uses, then the
+# .deb / .pkg.tar.zst files are attached to a GitHub Release. workflow_dispatch
+# allows a manual run against an explicit tag.
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Tag to create/publish the release for
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    uses: ./.github/workflows/build.yml
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Every artifact from the reusable build workflow (noble-debs,
+      # resolute-debs, arch-pkgs), each under its own subdirectory.
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+
+      - name: Assemble release assets
+        run: |
+          set -euo pipefail
+          mkdir -p release
+          # Debug/dbgsym packages are large and rarely wanted in a release.
+          find dist -type f \( -name '*.deb' -o -name '*.pkg.tar.zst' \) \
+            ! -name '*debug*' ! -name '*dbgsym*' -exec cp -t release {} +
+
+          count=$(find release -type f | wc -l)
+          [ "$count" -gt 0 ] || { echo "no packages assembled"; exit 1; }
+          echo "assembled $count package(s):"
+          ls -1 release
+
+          ( cd release && sha256sum -- * > SHA256SUMS )
+
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag="${{ inputs.tag || github.ref_name }}"
+
+          cat > NOTES.md <<'EOF'
+          bcachefs-enabled podman + containers/storage packages.
+
+          Filenames encode the upstream version; pick by distribution:
+
+          - **Arch** — `podman-bcachefs-*.pkg.tar.zst`, `podman-docker-bcachefs-*.pkg.tar.zst`
+          - **Ubuntu 24.04 (Noble)** — the `*+bcachefs1` debs with `podman 4.9.x` / `1.51.0` versions
+          - **Ubuntu 26.04 (Resolute)** — the `*+bcachefs1` debs with `podman 5.7.x` / `1.61.0` versions
+
+          Install storage + a recompiled podman; the `-dev` deb alone does nothing,
+          since driver registration happens at compile time. See the README for the
+          per-distro steps and the `apt-mark hold` note. `SHA256SUMS` covers every
+          attached file.
+
+          Every package here was built and had its bcachefs driver symbol verified
+          by the same pipeline that gates CI.
+          EOF
+
+          if gh release view "$tag" >/dev/null 2>&1; then
+            gh release upload "$tag" release/* --clobber
+          else
+            gh release create "$tag" release/* \
+              --title "$tag" --notes-file NOTES.md
+          fi

@@ -75,6 +75,16 @@ unpatched podman, which then refuses to start against a `bcachefs` storage.conf.
 To take a security update, rebuild the new version through the Containerfiles
 (they re-derive from `apt-get source podman`) rather than unholding.
 
+### Prebuilt packages
+
+Tagged releases carry prebuilt `.deb` (Noble, Resolute) and `.pkg.tar.zst`
+(Arch) packages with a `SHA256SUMS`, built and driver-verified by the same
+pipeline that gates CI. Cutting one is a tag push:
+
+```bash
+git tag v5.7.0-bcachefs1 && git push --tags
+```
+
 Enable it in `/etc/containers/storage.conf`:
 
 ```toml

@@ -1,0 +1,196 @@
+name: build
+
+# Reusable build+verify pipeline, called by ci.yml (push/PR) and release.yml (tags).
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+env:
+  # Function-name strings survive `strip`, unlike go:itab symbols, so they are
+  # what we assert on for packaged (stripped) binaries. Always matched with
+  # `grep -qaF "${DRIVER_SYMBOL:?}"`: an unset var would make `grep -q` match
+  # anything and turn the assertion into a silent no-op.
+  DRIVER_SYMBOL: storage/drivers/bcachefs.diffDriver.ApplyDiff
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+
+      - name: gofumpt
+        run: |
+          go install mvdan.cc/gofumpt@latest
+          unformatted="$("$(go env GOPATH)/bin/gofumpt" -l driver packaging/noble/driver)"
+          if [ -n "$unformatted" ]; then
+            echo "gofumpt would reformat:"
+            echo "$unformatted"
+            exit 1
+          fi
+
+      - name: shell syntax
+        run: |
+          bash -n packaging/apply-driver.sh
+          bash -n scripts/test-snapshot-chain.sh
+
+  # Compile the driver against the oldest storage that carries the canonical
+  # driver. The newer targets (1.61, 1.62) are compiled by the distro jobs
+  # below, so real API drift still fails somewhere in this workflow.
+  vet:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+
+      # The btrfs graphdriver is cgo and needs its headers; building ./drivers/...
+      # without them fails on btrfs/version.h, not on anything we ship.
+      - name: Install graphdriver headers
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libbtrfs-dev
+
+      - name: Overlay driver onto containers/storage and vet
+        run: |
+          git clone --depth 1 --branch v1.59.1 \
+            https://github.com/containers/storage.git /tmp/storage
+          ./packaging/apply-driver.sh /tmp/storage ./driver
+          cd /tmp/storage
+          go build ./drivers/... ./pkg/archive/...
+          go vet ./drivers/bcachefs/...
+
+  noble:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build bcachefs-enabled containers/storage (Ubuntu 24.04)
+        run: podman build -f packaging/noble/Containerfile.storage -o out/noble/ .
+
+      - name: Verify driver landed in the -dev package
+        run: |
+          set -euo pipefail
+          dev=$(ls out/noble/golang-github-containers-storage-dev_*+bcachefs1_all.deb)
+          contents=$(dpkg-deb -c "$dev")
+          # Here-strings, never `echo ... | grep -q`: grep -q exits on first match,
+          # echo dies of SIGPIPE, and pipefail then reports the whole pipeline as
+          # failed -- a false "missing" on a file that is present.
+          for f in drivers/bcachefs/bcachefs.go \
+                   drivers/register/register_bcachefs.go \
+                   pkg/archive/changes_full.go; do
+            grep -qF -- "$f" <<<"$contents" || { echo "missing $f in $dev"; exit 1; }
+          done
+          # All three driver_linux.go edits, not just the constant.
+          linux=$(dpkg-deb --fsys-tarfile "$dev" \
+            | tar -xO ./usr/share/gocode/src/github.com/containers/storage/drivers/driver_linux.go)
+          grep -qF 'FsMagicBcachefs = FsMagic(0xca451a4e)' <<<"$linux" || { echo "const missing"; exit 1; }
+          grep -qF 'FsMagicBcachefs:' <<<"$linux" || { echo "FsNames entry missing"; exit 1; }
+          awk '/^\t\t"bcachefs",$/ { f = 1 } END { exit !f }' <<<"$linux" || { echo "Priority entry missing"; exit 1; }
+          echo "noble: driver present, driver_linux.go fully patched"
+
+      - name: Rebuild podman against it
+        run: podman build -f packaging/noble/Containerfile.podman -o out/noble/ .
+
+      - name: Verify bcachefs is linked into the podman binary
+        run: |
+          set -euo pipefail
+          deb=$(ls out/noble/podman_*+bcachefs1_amd64.deb)
+          dpkg-deb --fsys-tarfile "$deb" | tar -xO ./usr/bin/podman > /tmp/podman-bin
+          grep -qaF "${DRIVER_SYMBOL:?}" /tmp/podman-bin \
+            || { echo "bcachefs driver not linked into $deb"; exit 1; }
+          echo "noble: $DRIVER_SYMBOL present in podman binary"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: noble-debs
+          path: out/noble/*.deb
+
+  resolute:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build bcachefs-enabled containers/storage (Ubuntu 26.04)
+        run: podman build -f packaging/resolute/Containerfile.storage -o out/resolute/ .
+
+      - name: Rebuild podman against it
+        run: podman build -f packaging/resolute/Containerfile.podman -o out/resolute/ .
+
+      - name: Verify bcachefs is linked into the podman binary
+        run: |
+          set -euo pipefail
+          deb=$(ls out/resolute/podman_*+bcachefs1_amd64.deb)
+          dpkg-deb --fsys-tarfile "$deb" | tar -xO ./usr/bin/podman > /tmp/podman-bin
+          grep -qaF "${DRIVER_SYMBOL:?}" /tmp/podman-bin \
+            || { echo "bcachefs driver not linked into $deb"; exit 1; }
+          echo "resolute: $DRIVER_SYMBOL present in podman binary"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: resolute-debs
+          path: out/resolute/*.deb
+
+  arch:
+    runs-on: ubuntu-latest
+    container:
+      image: docker.io/library/archlinux:base-devel
+    steps:
+      - name: Install build dependencies
+        run: |
+          pacman -Syu --noconfirm --needed \
+            git go go-md2man apparmor btrfs-progs catatonit containers-common \
+            gpgme libseccomp man-db shadow sqlite systemd binutils
+
+      - uses: actions/checkout@v4
+
+      # makepkg refuses to run as root.
+      #
+      # --nocheck: the PKGBUILD's check() is Arch's gate that podman's vendored
+      # container-libs matches the *system* containers-common. On a rolling
+      # archlinux image that legitimately drifts ahead of our pinned pkgver, and
+      # it says nothing about whether the bcachefs driver still applies and
+      # links -- which is what this job exists to prove. The gate is kept in the
+      # PKGBUILD for people building locally, and the skew is reported below
+      # rather than swallowed.
+      #
+      # --skippgpcheck: the release keys are not in the container keyring.
+      # Source integrity is still enforced by the pinned sha512/b2sums.
+      - name: Build podman-bcachefs package
+        run: |
+          set -euo pipefail
+          useradd --create-home builder
+          chown -R builder:builder .
+          su builder -c 'cd packaging/arch && makepkg -f --noconfirm --skippgpcheck --nocheck'
+
+      - name: Report container-libs skew (non-fatal)
+        run: |
+          set -euo pipefail
+          system=$(</usr/share/containers/container-libs.version)
+          pinned=$(sed -nE 's|.*go.podman.io/common v(.*)|\1|p' packaging/arch/src/podman/go.mod)
+          if [ "${system%.*}" != "${pinned%.*}" ]; then
+            echo "::warning::podman pkgver wants container-libs ${pinned%.*}, Arch now ships ${system%.*}; bump pkgver in packaging/arch/PKGBUILD"
+          else
+            echo "container-libs in sync: ${system%.*}"
+          fi
+
+      - name: Verify bcachefs is linked into the podman binary
+        run: |
+          set -euo pipefail
+          # Anchored on the version so podman-docker-* and *-debug cannot match.
+          pkg=$(ls packaging/arch/podman-bcachefs-[0-9]*.pkg.tar.zst)
+          [ "$(echo "$pkg" | wc -l)" -eq 1 ] || { echo "ambiguous package glob: $pkg"; exit 1; }
+          bsdtar -xOf "$pkg" usr/bin/podman > /tmp/podman-bin
+          grep -qaF "${DRIVER_SYMBOL:?}" /tmp/podman-bin \
+            || { echo "bcachefs driver not linked into $pkg"; exit 1; }
+          echo "arch: $DRIVER_SYMBOL present in podman binary"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: arch-pkgs
+          path: packaging/arch/*.pkg.tar.zst
