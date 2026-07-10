@@ -1,0 +1,11 @@
+out/
+*.deb
+*.ddeb
+*.buildinfo
+*.changes
+*.pkg.tar.zst
+*.src.tar.gz
+.SRCINFO
+packaging/arch/src/
+packaging/arch/pkg/
+packaging/arch/podman/

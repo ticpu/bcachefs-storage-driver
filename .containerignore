@@ -1,0 +1,12 @@
+.git
+.gitleaks.toml
+
+# The Arch build clones podman and sets GOPATH into packaging/arch/, which
+# would otherwise drag gigabytes into every container build context.
+packaging/arch/src
+packaging/arch/pkg
+packaging/arch/podman
+*.pkg.tar.zst
+
+# NOTE: out/ is deliberately NOT ignored — Containerfile.podman consumes the
+# storage -dev deb produced by Containerfile.storage.

@@ -1,0 +1,52 @@
+# Build a bcachefs-enabled containers/storage for Ubuntu 26.04 (Resolute).
+# Resolute ships storage 1.61.0, whose module path is go.podman.io/storage and
+# whose ProtoDriver has no SyncMode — the canonical driver/ matches it as-is.
+#
+#   podman build -f packaging/resolute/Containerfile.storage -o out/resolute/ .
+
+FROM docker.io/library/ubuntu:resolute AS builder-base
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    dpkg-dev \
+    devscripts \
+    equivs \
+    fakeroot \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+FROM builder-base AS builder-deps
+
+RUN sed -i 's/^Types: deb$/Types: deb deb-src/' /etc/apt/sources.list.d/ubuntu.sources
+
+WORKDIR /build
+RUN apt-get update \
+    && apt-get source golang-github-containers-storage \
+    && mk-build-deps -i -t 'apt-get -y --no-install-recommends' golang-github-containers-storage-*/debian/control \
+    && rm -f *build-deps*.deb \
+    && rm -rf /var/lib/apt/lists/*
+
+FROM builder-deps AS builder
+
+# Build unprivileged, like an Ubuntu buildd. Debian's skip guard in
+# TestStoreMultiList calls err.Error() on the CreateContainer result, which is
+# only nil when running as root, so a root build segfaults the test suite.
+RUN useradd --create-home builder && chown -R builder:builder /build
+
+COPY --chown=builder:builder packaging/apply-driver.sh /build/apply-driver.sh
+COPY --chown=builder:builder driver/ /build/driver/
+
+USER builder
+WORKDIR /build
+ENV DEBEMAIL=jeromepoulin@gmail.com \
+    DEBFULLNAME="Jérôme Poulin"
+
+RUN set -e && \
+    cd golang-github-containers-storage-* && \
+    /build/apply-driver.sh --module go.podman.io/storage --strip-tests . /build/driver && \
+    debchange --newversion "$(dpkg-parsechangelog -S Version)+bcachefs1" \
+        --distribution resolute \
+        "Add bcachefs storage driver with COW-aware diff" && \
+    dpkg-buildpackage -us -uc -b
+
+FROM scratch AS output
+COPY --from=builder /build/*.deb /

@@ -1,0 +1,133 @@
+# podman rebuilt with the bcachefs graphdriver compiled in.
+#
+# Deliberately NOT named `podman`: an identically-named package is replaced by
+# the next `pacman -Syu`, which would silently drop the driver and leave every
+# bcachefs-backed image unreachable. This conflicts with and provides `podman`
+# instead, so the official package can never quietly take its place.
+#
+# Tracks the official archlinux/packaging/packages/podman PKGBUILD; the only
+# deltas are the rename and the bcachefs block in build(). When bumping,
+# re-derive from upstream rather than editing in place — the official file gains
+# deps and functions between releases.
+
+pkgbase=podman-bcachefs
+pkgname=(podman-bcachefs podman-docker-bcachefs)
+_srcname=podman
+pkgver=5.8.4
+pkgrel=1
+pkgdesc='Tool and library for running OCI-based containers in pods (bcachefs-enabled)'
+arch=(x86_64)
+url='https://github.com/containers/podman'
+license=(Apache-2.0)
+makedepends=(
+  apparmor
+  btrfs-progs
+  catatonit
+  containers-common
+  git
+  go
+  go-md2man
+  gpgme
+  libseccomp
+  man-db
+  shadow
+  sqlite
+  systemd
+)
+# https://github.com/containers/podman/issues/13297
+options=(!lto)
+source=(
+  "git+https://github.com/containers/podman?signed#tag=v$pkgver"
+)
+# See the release-keys repository
+# https://github.com/containers/release-keys
+validpgpkeys=(
+  B7DBDCA456F7335E91F1C25CD3624C551D0515C4  # Matthew Heon <mheon@redhat.com>
+  7CE1E6F8C90CB53E7E4D8F2D502E08DB0BBF8EEE  # Ashley Cui <acui@redhat.com>
+  9E33DD8704CC03E2DEB84D9A1C1EDD7CC7C3A0DD  # Lokesh Mandvekar <lsm5@redhat.com>
+)
+sha512sums=('bfe4021d16c9f8d49ac1b202fa333e33d983bb3687913de9edb54e1fecbd717744a11f9af5f24a2c1a3e37e469eae049641247ad17be5c717e09f6b0867f9428')
+b2sums=('5b65d24da3c0ad268f174be65e0b7c36c2407167582bc14db7e4ed279d8e8127b37f7f871247d839ebec5fa32c04094d21e46a4c911d8d4a9a6abb3d9e4cb755')
+
+build() {
+  # $startdir is only guaranteed inside the packaging functions.
+  local repo
+  repo="$(realpath "$startdir/../..")"
+
+  export CGO_CPPFLAGS="${CPPFLAGS}"
+  export CGO_CFLAGS="${CFLAGS}"
+  export CGO_CXXFLAGS="${CXXFLAGS}"
+  export CGO_LDFLAGS="${LDFLAGS}"
+  export GOFLAGS="-buildmode=pie"
+  export GOPATH="${srcdir}"
+
+  cd $_srcname
+
+  "$repo/packaging/apply-driver.sh" --module go.podman.io/storage --strip-tests \
+      vendor/go.podman.io/storage "$repo/driver"
+
+  # Vendored builds need the new package listed or go refuses to load it.
+  if ! grep -q 'storage/drivers/bcachefs' vendor/modules.txt; then
+    sed -i '/go.podman.io\/storage\/drivers\/btrfs/a go.podman.io/storage/drivers/bcachefs' vendor/modules.txt
+  fi
+  grep -q 'storage/drivers/bcachefs' vendor/modules.txt
+
+  cd ..
+
+  make EXTRA_LDFLAGS='-compressdwarf=false -linkmode=external' PREFIX=/usr -C $_srcname
+  make docker-docs -C $_srcname
+}
+
+check() {
+  local container_libs_version="$(</usr/share/containers/container-libs.version)"
+  local project_container_libs_version="$(sed --regexp-extended --quiet 's|.*go.podman.io/common v(.*)|\1|p' "$_srcname/go.mod")"
+
+  printf '%s %s (container-libs %s) - system container-libs %s\n' "$pkgbase" "$pkgver" "${project_container_libs_version%.*}" "${container_libs_version%.*}"
+
+  if (( $(vercmp "${container_libs_version%.*}" "${project_container_libs_version%.*}") != 0 )); then
+    printf '%s %s requires container-libs/common in version %s but we have version %s\n' "$pkgbase" "$pkgver" "${project_container_libs_version%.*}" "${container_libs_version%.*}"
+    exit 1
+  fi
+}
+
+package_podman-bcachefs() {
+  provides=("podman=$pkgver")
+  conflicts=(podman)
+  depends=(
+    catatonit
+    conmon
+    containers-common
+    oci-runtime
+    glibc
+    iptables
+    gpgme libgpgme.so
+    libgcc
+    libseccomp libseccomp.so
+    passt
+    shadow
+    sqlite
+  )
+  optdepends=(
+    'apparmor: for AppArmor support'
+    'bcachefs-tools: inspect the bcachefs backend subvolumes'
+    'btrfs-progs: support btrfs backend devices'
+    'fuse-overlayfs: for deprecated storage driver in rootless environment'
+    'podman-compose: for docker-compose compatibility'
+    'podman-docker-bcachefs: for Docker-compatible CLI'
+    'slirp4netns: for alternative rootless network support'
+  )
+
+  make install install.completions DESTDIR="$pkgdir" PREFIX=/usr LIBEXECDIR=/usr/lib -C $_srcname
+}
+
+package_podman-docker-bcachefs() {
+  pkgdesc='Emulate Docker CLI using podman (bcachefs-enabled)'
+  provides=("podman-docker=$pkgver" docker)
+  conflicts=(podman-docker docker)
+  depends=(
+    podman-bcachefs
+    sh
+  )
+
+  make install.docker-full DESTDIR="$pkgdir" PREFIX=/usr -C $_srcname
+}

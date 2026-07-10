@@ -1,0 +1,55 @@
+# Rebuild Resolute's podman against the bcachefs-patched containers/storage.
+# Driver registration happens at compile time: storage's store.go blank-imports
+# drivers/register, which pulls in each driver's init(). Installing the patched
+# -dev package alone does nothing; podman has to be recompiled.
+#
+# Expects the storage debs from Containerfile.storage in ./out/resolute/
+#   podman build -f packaging/resolute/Containerfile.podman -o out/resolute/ .
+
+FROM docker.io/library/ubuntu:resolute AS builder-base
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    dpkg-dev \
+    devscripts \
+    equivs \
+    fakeroot \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+FROM builder-base AS builder-deps
+
+RUN sed -i 's/^Types: deb$/Types: deb deb-src/' /etc/apt/sources.list.d/ubuntu.sources
+
+WORKDIR /build
+
+# 1.61.0+ds1-N+bcachefs1 outranks the archive's 1.61.0+ds1-N, so installing it
+# first satisfies podman's "storage-dev (>= 1.61)" build-dep with no downgrade.
+COPY out/resolute/golang-github-containers-storage-dev_*.deb /build/
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ./golang-github-containers-storage-dev_*.deb \
+    && rm -f /build/golang-github-containers-storage-dev_*.deb \
+    && apt-get source podman \
+    && mk-build-deps -i -t 'apt-get -y --no-install-recommends' podman-*/debian/control \
+    && rm -f *build-deps*.deb \
+    && dpkg-query -W -f='${Version}\n' golang-github-containers-storage-dev | grep -q '+bcachefs1' \
+    && rm -rf /var/lib/apt/lists/*
+
+FROM builder-deps AS builder
+
+RUN useradd --create-home builder && chown -R builder:builder /build
+
+USER builder
+WORKDIR /build
+ENV DEBEMAIL=jeromepoulin@gmail.com \
+    DEBFULLNAME="Jérôme Poulin"
+
+RUN set -e && \
+    cd podman-* && \
+    debchange --newversion "$(dpkg-parsechangelog -S Version)+bcachefs1" \
+        --distribution resolute \
+        "Rebuild against bcachefs-enabled containers/storage" && \
+    dpkg-buildpackage -us -uc -b
+
+FROM scratch AS output
+COPY --from=builder /build/*.deb /

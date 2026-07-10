@@ -1,0 +1,60 @@
+# Rebuild Noble's podman against the bcachefs-patched containers/storage.
+# Driver registration happens at compile time: storage's store.go blank-imports
+# drivers/register, which pulls in each driver's init(). Installing the patched
+# -dev package alone does nothing; podman has to be recompiled.
+#
+# Expects the storage debs from Containerfile.storage in ./out/noble/
+#   podman build -f packaging/noble/Containerfile.podman -o out/noble/ .
+
+FROM docker.io/library/ubuntu:noble AS builder-base
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    dpkg-dev \
+    devscripts \
+    equivs \
+    fakeroot \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+FROM builder-base AS builder-deps
+
+RUN sed -i 's/^Types: deb$/Types: deb deb-src/' /etc/apt/sources.list.d/ubuntu.sources
+
+WORKDIR /build
+
+# Noble builds podman from the `libpod` source package; Resolute renamed it to
+# `podman`. `apt-get source podman` resolves either, but the unpacked directory
+# differs, hence the libpod-* globs below.
+COPY out/noble/golang-github-containers-storage-dev_*.deb /build/
+
+# The +bcachefs1 suffix only outranks the archive when both share the same base
+# version. If Ubuntu publishes a newer storage revision than the source this deb
+# was built from, apt reinstalls the unpatched one; the dpkg-query guard below
+# turns that into a hard failure instead of a podman silently lacking bcachefs.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ./golang-github-containers-storage-dev_*.deb \
+    && rm -f /build/golang-github-containers-storage-dev_*.deb \
+    && apt-get source podman \
+    && mk-build-deps -i -t 'apt-get -y --no-install-recommends' libpod-*/debian/control \
+    && rm -f *build-deps*.deb \
+    && dpkg-query -W -f='${Version}\n' golang-github-containers-storage-dev | grep -q '+bcachefs1' \
+    && rm -rf /var/lib/apt/lists/*
+
+FROM builder-deps AS builder
+
+RUN useradd --create-home builder && chown -R builder:builder /build
+
+USER builder
+WORKDIR /build
+ENV DEBEMAIL=jeromepoulin@gmail.com \
+    DEBFULLNAME="Jérôme Poulin"
+
+RUN set -e && \
+    cd libpod-* && \
+    debchange --newversion "$(dpkg-parsechangelog -S Version)+bcachefs1" \
+        --distribution noble \
+        "Rebuild against bcachefs-enabled containers/storage" && \
+    dpkg-buildpackage -us -uc -b
+
+FROM scratch AS output
+COPY --from=builder /build/*.deb /

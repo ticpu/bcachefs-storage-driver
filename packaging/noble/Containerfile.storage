@@ -1,0 +1,52 @@
+# Build a bcachefs-enabled containers/storage for Ubuntu 24.04 (Noble).
+#
+# Noble ships storage 1.51.0, which predates the go.podman.io rename and whose
+# archive.FileInfo has no `target` field. Symlink-target collection therefore
+# cannot be backported, so this target uses its own driver copies under
+# packaging/noble/driver/ rather than the canonical driver/.
+#
+#   podman build -f packaging/noble/Containerfile.storage -o out/noble/ .
+
+FROM docker.io/library/ubuntu:noble AS builder-base
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    dpkg-dev \
+    devscripts \
+    equivs \
+    fakeroot \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+FROM builder-base AS builder-deps
+
+RUN sed -i 's/^Types: deb$/Types: deb deb-src/' /etc/apt/sources.list.d/ubuntu.sources
+
+WORKDIR /build
+RUN apt-get update \
+    && apt-get source golang-github-containers-storage \
+    && mk-build-deps -i -t 'apt-get -y --no-install-recommends' golang-github-containers-storage-*/debian/control \
+    && rm -f *build-deps*.deb \
+    && rm -rf /var/lib/apt/lists/*
+
+FROM builder-deps AS builder
+
+RUN useradd --create-home builder && chown -R builder:builder /build
+
+COPY --chown=builder:builder packaging/apply-driver.sh /build/apply-driver.sh
+COPY --chown=builder:builder packaging/noble/driver/ /build/driver/
+
+USER builder
+WORKDIR /build
+ENV DEBEMAIL=jeromepoulin@gmail.com \
+    DEBFULLNAME="Jérôme Poulin"
+
+RUN set -e && \
+    cd golang-github-containers-storage-* && \
+    /build/apply-driver.sh --strip-tests . /build/driver && \
+    debchange --newversion "$(dpkg-parsechangelog -S Version)+bcachefs1" \
+        --distribution noble \
+        "Add bcachefs storage driver with COW-aware diff" && \
+    dpkg-buildpackage -us -uc -b
+
+FROM scratch AS output
+COPY --from=builder /build/*.deb /
