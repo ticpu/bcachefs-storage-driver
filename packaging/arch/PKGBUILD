@@ -38,6 +38,7 @@ makedepends=(
 options=(!lto)
 source=(
   "git+$url?signed#tag=v$pkgver"
+  00-storage-arch.conf
 )
 # See the release-keys repository
 # https://github.com/containers/release-keys
@@ -46,8 +47,10 @@ validpgpkeys=(
   7CE1E6F8C90CB53E7E4D8F2D502E08DB0BBF8EEE  # Ashley Cui <acui@redhat.com>
   9E33DD8704CC03E2DEB84D9A1C1EDD7CC7C3A0DD  # Lokesh Mandvekar <lsm5@redhat.com>
 )
-sha512sums=('4c9fdd580c9118745c6d1883079ef2791a3b08739e7c5655452a927e797a3c225cb8415e94ce8be57204fca003f604ca2f471be18e3139e2f98e46fda5e99ce6')
-b2sums=('c0f553a77d70eb8905b03c321f33fdc78651eca2adbe8aeaa2ed524a850dae8c47a54210c26fc6b9e992233e8859d4d20d7f6efefae8fbdcf5ad12f0ce0134a3')
+sha512sums=('4c9fdd580c9118745c6d1883079ef2791a3b08739e7c5655452a927e797a3c225cb8415e94ce8be57204fca003f604ca2f471be18e3139e2f98e46fda5e99ce6'
+            '104ae3064244d8f778b020c45849aaf10d9c9c9255c16e4779bc97b1120ac4e0371ce4606a30f02148d2bc20f944ebcf23e4546b92ead28ea75f0c5e04bc463e')
+b2sums=('c0f553a77d70eb8905b03c321f33fdc78651eca2adbe8aeaa2ed524a850dae8c47a54210c26fc6b9e992233e8859d4d20d7f6efefae8fbdcf5ad12f0ce0134a3'
+        '82d724dbb09e7342b98241c4a18211bc7dda99e04176070086d086e22ce21abfb60dd934c544bebb9f29a0998d1a7bdf13258008f7c0b448fae276c37d13fe70')
 
 build() {
   # $startdir is only guaranteed inside the packaging functions.
@@ -93,6 +96,7 @@ check() {
 package_podman-bcachefs() {
   provides=("podman=$pkgver")
   conflicts=(podman)
+  backup=(etc/containers/storage.conf.d/00-storage-arch.conf)
   depends=(
     catatonit
     conmon
@@ -117,6 +121,24 @@ package_podman-bcachefs() {
     'podman-desktop: GUI and tray to manage Podman containers (and Kubernetes pods)'
     'podman-docker-bcachefs: for Docker-compatible CLI'
   )
+
+  # Our drop-in only works by shadowing the containers-common one by name. If
+  # some other vendor file starts forcing a driver, the shadow no longer covers
+  # it and every fresh graphroot silently falls back to overlay -- so fail here
+  # instead of shipping a package that quietly does not use bcachefs.
+  local f
+  for f in /usr/share/containers/storage.conf.d/*.conf; do
+    [[ -e $f ]] || continue
+    [[ $f == /usr/share/containers/storage.conf.d/00-storage-arch.conf ]] && continue
+    if grep -qE '^[[:space:]]*driver[[:space:]]*=' "$f"; then
+      echo "unexpected containers-common drop-in forces a storage driver: $f" >&2
+      echo "packaging/arch/00-storage-arch.conf shadows only 00-storage-arch.conf" >&2
+      return 1
+    fi
+  done
+
+  install -Dm644 "$srcdir/00-storage-arch.conf" \
+    "$pkgdir/etc/containers/storage.conf.d/00-storage-arch.conf"
 
   make install install.completions DESTDIR="$pkgdir" PREFIX=/usr LIBEXECDIR=/usr/lib -C $_srcname
 }

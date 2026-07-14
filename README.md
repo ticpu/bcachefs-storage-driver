@@ -162,6 +162,21 @@ point podman at a fresh root: an unknown driver reports `driver not supported`,
 while a registered one reports
 `prerequisites for driver not satisfied (wrong filesystem?)`.
 
+**`User-selected graph driver "overlay" overwritten by graph driver "bcachefs"
+from database`, or a fresh graphroot coming up `overlay`** — on Arch with podman
+>= 6.0. Storage 1.63 parses drop-ins *after* the main config, and Arch's
+`containers-common` ships `/usr/share/containers/storage.conf.d/00-storage-arch.conf`
+with `driver = "overlay"`. A vendor drop-in therefore overrides
+`driver = "bcachefs"` in `/etc/containers/storage.conf`, and an explicit driver
+short-circuits `driver_priority` entirely. Existing stores survive only because
+the database remembers the real driver and overrides the config back — that error
+*is* podman reporting the config lost.
+
+`podman-bcachefs` ships `/etc/containers/storage.conf.d/00-storage-arch.conf`,
+which neutralizes it: drop-ins are de-duplicated by basename with `/etc`
+outranking `/usr/share`, so reusing the name replaces the vendor file. Ours sets
+only `driver_priority`, so an explicit `driver` in `storage.conf` still wins.
+
 **`bcachefs subvolume list` prints paths that do not exist** — under a
 *subdirectory* mount (`/dev/sdX[/@sub/dir]` mounted at `/var/lib/containers`)
 the tool builds paths relative to the enclosing subvolume root rather than the
