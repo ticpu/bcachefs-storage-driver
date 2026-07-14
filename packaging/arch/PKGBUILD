@@ -13,11 +13,11 @@
 pkgbase=podman-bcachefs
 pkgname=(podman-bcachefs podman-docker-bcachefs)
 _srcname=podman
-pkgver=5.8.4
+pkgver=6.0.1
 pkgrel=1
-pkgdesc='Tool and library for running OCI-based containers in pods (bcachefs-enabled)'
+pkgdesc='A tool for managing OCI containers and pods (bcachefs-enabled)'
 arch=(x86_64)
-url='https://github.com/containers/podman'
+url='https://github.com/podman-container-tools/podman'
 license=(Apache-2.0)
 makedepends=(
   apparmor
@@ -37,7 +37,7 @@ makedepends=(
 # https://github.com/containers/podman/issues/13297
 options=(!lto)
 source=(
-  "git+https://github.com/containers/podman?signed#tag=v$pkgver"
+  "git+$url?signed#tag=v$pkgver"
 )
 # See the release-keys repository
 # https://github.com/containers/release-keys
@@ -46,8 +46,8 @@ validpgpkeys=(
   7CE1E6F8C90CB53E7E4D8F2D502E08DB0BBF8EEE  # Ashley Cui <acui@redhat.com>
   9E33DD8704CC03E2DEB84D9A1C1EDD7CC7C3A0DD  # Lokesh Mandvekar <lsm5@redhat.com>
 )
-sha512sums=('bfe4021d16c9f8d49ac1b202fa333e33d983bb3687913de9edb54e1fecbd717744a11f9af5f24a2c1a3e37e469eae049641247ad17be5c717e09f6b0867f9428')
-b2sums=('5b65d24da3c0ad268f174be65e0b7c36c2407167582bc14db7e4ed279d8e8127b37f7f871247d839ebec5fa32c04094d21e46a4c911d8d4a9a6abb3d9e4cb755')
+sha512sums=('4c9fdd580c9118745c6d1883079ef2791a3b08739e7c5655452a927e797a3c225cb8415e94ce8be57204fca003f604ca2f471be18e3139e2f98e46fda5e99ce6')
+b2sums=('c0f553a77d70eb8905b03c321f33fdc78651eca2adbe8aeaa2ed524a850dae8c47a54210c26fc6b9e992233e8859d4d20d7f6efefae8fbdcf5ad12f0ce0134a3')
 
 build() {
   # $startdir is only guaranteed inside the packaging functions.
@@ -74,7 +74,7 @@ build() {
 
   cd ..
 
-  make EXTRA_LDFLAGS='-compressdwarf=false -linkmode=external' PREFIX=/usr -C $_srcname
+  make EXTRA_LDFLAGS='-linkmode=external' PREFIX=/usr -C $_srcname
   make docker-docs -C $_srcname
 }
 
@@ -99,7 +99,7 @@ package_podman-bcachefs() {
     containers-common
     oci-runtime
     glibc
-    iptables
+    nftables
     gpgme libgpgme.so
     libgcc
     libseccomp libseccomp.so
@@ -112,9 +112,10 @@ package_podman-bcachefs() {
     'bcachefs-tools: inspect the bcachefs backend subvolumes'
     'btrfs-progs: support btrfs backend devices'
     'fuse-overlayfs: for deprecated storage driver in rootless environment'
+    'podlet: Generate Podman Quadlet files from a Podman command, compose file, or existing object'
     'podman-compose: for docker-compose compatibility'
+    'podman-desktop: GUI and tray to manage Podman containers (and Kubernetes pods)'
     'podman-docker-bcachefs: for Docker-compatible CLI'
-    'slirp4netns: for alternative rootless network support'
   )
 
   make install install.completions DESTDIR="$pkgdir" PREFIX=/usr LIBEXECDIR=/usr/lib -C $_srcname

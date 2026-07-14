@@ -31,8 +31,9 @@ done
 src="$1"
 driver="$2"
 linux="$src/drivers/driver_linux.go"
+generic="$src/drivers/driver.go"
 
-for f in "$linux" "$driver/bcachefs.go"; do
+for f in "$linux" "$generic" "$driver/bcachefs.go"; do
     [[ -f "$f" ]] || { echo "missing $f" >&2; exit 1; }
 done
 
@@ -43,6 +44,21 @@ install -m 0644 "$driver/changes_full.go" "$src/pkg/archive/"
 
 if [[ $strip_tests -eq 0 ]]; then
     install -m 0644 "$driver/bcachefs_test.go" "$src/drivers/bcachefs/"
+fi
+
+# ProtoDriver gained SyncMode() in storage 1.63; older trees have no SyncMode
+# type at all. Ask the target tree instead of tracking a per-distro flag: it is
+# the authority, and either mistake is a loud compile error (a missing method
+# fails to satisfy ProtoDriver, a stray one references an undefined type).
+if grep -qE '^type SyncMode ' "$generic"; then
+    [[ -f "$driver/syncmode.go" ]] || {
+        echo "$generic declares SyncMode but $driver/syncmode.go is missing" >&2
+        exit 1
+    }
+    echo "apply-driver: storage declares SyncMode, installing syncmode.go"
+    install -m 0644 "$driver/syncmode.go" "$src/drivers/bcachefs/"
+else
+    echo "apply-driver: storage has no SyncMode type, omitting syncmode.go"
 fi
 
 # storage >= 1.60 renamed the module to go.podman.io/storage

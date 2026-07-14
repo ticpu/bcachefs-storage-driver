@@ -40,7 +40,7 @@ jobs:
           bash -n scripts/test-snapshot-chain.sh
 
   # Compile the driver against the oldest storage that carries the canonical
-  # driver. The newer targets (1.61, 1.62) are compiled by the distro jobs
+  # driver. The newer targets (1.61, 1.63) are compiled by the distro jobs
   # below, so real API drift still fails somewhere in this workflow.
   vet:
     runs-on: ubuntu-latest
