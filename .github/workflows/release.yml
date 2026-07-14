@@ -47,6 +47,15 @@ jobs:
 
           ( cd release && sha256sum -- * > SHA256SUMS )
 
+      # Notes carry the exact filenames just built, so the install snippets never
+      # drift from the assets. Generated from dist/, not hand-maintained.
+      - name: Generate release notes
+        run: |
+          set -euo pipefail
+          tag="${{ inputs.tag || github.ref_name }}"
+          .github/release-notes.sh "$tag" "${{ github.repository }}" dist > NOTES.md
+          cat NOTES.md
+
       - name: Publish GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -54,26 +63,9 @@ jobs:
           set -euo pipefail
           tag="${{ inputs.tag || github.ref_name }}"
 
-          cat > NOTES.md <<'EOF'
-          bcachefs-enabled podman + containers/storage packages.
-
-          Filenames encode the upstream version; pick by distribution:
-
-          - **Arch** — `podman-bcachefs-*.pkg.tar.zst`, `podman-docker-bcachefs-*.pkg.tar.zst`
-          - **Ubuntu 24.04 (Noble)** — the `*+bcachefs1` debs with `podman 4.9.x` / `1.51.0` versions
-          - **Ubuntu 26.04 (Resolute)** — the `*+bcachefs1` debs with `podman 5.7.x` / `1.61.0` versions
-
-          Install storage + a recompiled podman; the `-dev` deb alone does nothing,
-          since driver registration happens at compile time. See the README for the
-          per-distro steps and the `apt-mark hold` note. `SHA256SUMS` covers every
-          attached file.
-
-          Every package here was built and had its bcachefs driver symbol verified
-          by the same pipeline that gates CI.
-          EOF
-
           if gh release view "$tag" >/dev/null 2>&1; then
             gh release upload "$tag" release/* --clobber
+            gh release edit "$tag" --notes-file NOTES.md
           else
             gh release create "$tag" release/* \
               --title "$tag" --notes-file NOTES.md

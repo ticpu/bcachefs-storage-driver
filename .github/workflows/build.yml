@@ -38,6 +38,7 @@ jobs:
         run: |
           bash -n packaging/apply-driver.sh
           bash -n scripts/test-snapshot-chain.sh
+          bash -n .github/release-notes.sh
 
   # Compile the driver against the oldest storage that carries the canonical
   # driver. The newer targets (1.61, 1.63) are compiled by the distro jobs

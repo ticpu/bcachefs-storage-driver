@@ -177,6 +177,10 @@ which neutralizes it: drop-ins are de-duplicated by basename with `/etc`
 outranking `/usr/share`, so reusing the name replaces the vendor file. Ours sets
 only `driver_priority`, so an explicit `driver` in `storage.conf` still wins.
 
+`driver_priority` only decides for a graphroot with no prior driver directory:
+`New()` scans for one first, so a store carrying `overlay/` stays on overlay. Set
+`driver` explicitly to move an existing store.
+
 **`bcachefs subvolume list` prints paths that do not exist** — under a
 *subdirectory* mount (`/dev/sdX[/@sub/dir]` mounted at `/var/lib/containers`)
 the tool builds paths relative to the enclosing subvolume root rather than the
