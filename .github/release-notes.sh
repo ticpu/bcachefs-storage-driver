@@ -8,7 +8,7 @@ set -euo pipefail
 # Usage: release-notes.sh <tag> <owner/repo> <dist-dir> > NOTES.md
 #
 # <dist-dir> holds one subdirectory per upload-artifact name: arch-pkgs/,
-# noble-debs/, resolute-debs/.
+# noble-debs/, resolute-debs/, trixie-debs/.
 
 [[ $# -eq 3 ]] || { echo "usage: release-notes.sh <tag> <owner/repo> <dist-dir>" >&2; exit 2; }
 
@@ -46,6 +46,8 @@ mapfile -t noble < <(pick "$dist/noble-debs" noble \
     "$dist"/noble-debs/podman_*.deb "$dist"/noble-debs/podman-docker_*.deb)
 mapfile -t resolute < <(pick "$dist/resolute-debs" resolute \
     "$dist"/resolute-debs/podman_*.deb "$dist"/resolute-debs/podman-docker_*.deb)
+mapfile -t trixie < <(pick "$dist/trixie-debs" trixie \
+    "$dist"/trixie-debs/podman_*.deb "$dist"/trixie-debs/podman-docker_*.deb)
 
 curl_lines() {
     local f
@@ -81,14 +83,9 @@ EOF
 cat <<EOF
 bcachefs-enabled podman + containers/storage packages.
 
-The bcachefs driver is registered at compile time, so podman must be *recompiled*
-against the patched storage — installing a patched storage library alone does
-nothing. These packages are already built that way, and every one of them had its
-bcachefs driver symbol verified by the same pipeline that gates CI.
-
-Each snippet below downloads only the packages for that platform, checks them
-against \`SHA256SUMS\`, and installs them. \`sha256sum --ignore-missing -c\` verifies
-the files you actually downloaded and ignores the rest of the release.
+The driver is registered at compile time, so podman must be *recompiled* against
+the patched storage — installing a patched storage library alone does nothing.
+Each binary here was checked for the driver symbol by the pipeline that built it.
 
 ## Install
 
@@ -114,13 +111,15 @@ $(deb_section 'Ubuntu 24.04 (Noble)' "${noble[@]}")
 
 $(deb_section 'Ubuntu 26.04 (Resolute)' "${resolute[@]}")
 
+$(deb_section 'Debian 13 (Trixie)' "${trixie[@]}")
+
 The \`apt-mark hold\` is not optional. A later archive revision sorts *above* our
 \`+bcachefs1\` suffix, so an unheld upgrade silently installs an unpatched podman,
 which then refuses to start against a \`bcachefs\` storage.conf. To take a security
 update, rebuild the new version from the repository's Containerfiles instead of
 unholding.
 
-On Ubuntu, point podman at bcachefs in \`/etc/containers/storage.conf\`:
+On Debian and Ubuntu, point podman at bcachefs in \`/etc/containers/storage.conf\`:
 
 \`\`\`toml
 [storage]

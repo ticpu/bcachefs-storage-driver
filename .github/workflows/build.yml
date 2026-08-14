@@ -40,9 +40,12 @@ jobs:
           bash -n scripts/test-snapshot-chain.sh
           bash -n .github/release-notes.sh
 
-  # Compile the driver against the oldest storage that carries the canonical
-  # driver. The newer targets (1.61, 1.63) are compiled by the distro jobs
-  # below, so real API drift still fails somewhere in this workflow.
+  # Compile the driver against both ends of the range the canonical driver
+  # covers: the oldest tree it is applied to (Trixie's 1.57) and the newest
+  # released storage. The distro jobs below cover what is in between. The test
+  # file only builds on the new end -- NaiveDiffDriver.ApplyDiff lost its
+  # `parent` argument in 1.62 -- so the old end is compiled with tests stripped,
+  # exactly as the distro packages build it.
   vet:
     runs-on: ubuntu-latest
     steps:
@@ -57,12 +60,28 @@ jobs:
       - name: Install graphdriver headers
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libbtrfs-dev
 
-      - name: Overlay driver onto containers/storage and vet
+      - name: Compile against storage 1.57 (Trixie floor)
         run: |
-          git clone --depth 1 --branch v1.59.1 \
-            https://github.com/containers/storage.git /tmp/storage
-          ./packaging/apply-driver.sh /tmp/storage ./driver
-          cd /tmp/storage
+          git clone --depth 1 --branch v1.57.2 \
+            https://github.com/containers/storage.git /tmp/storage-old
+          ./packaging/apply-driver.sh --strip-tests /tmp/storage-old ./driver
+          cd /tmp/storage-old
+          go build ./drivers/... ./pkg/archive/...
+
+      - name: Compile and vet against the newest released storage
+        run: |
+          set -euo pipefail
+          # awk, not grep: grep here may be ugrep. The pattern also drops any
+          # prerelease tag, which sort -V would rank above the release.
+          ref=$(git ls-remote --tags --refs https://github.com/containers/container-libs.git 'refs/tags/storage/v*' \
+            | awk -F/ '$NF ~ /^v[0-9]+\.[0-9]+\.[0-9]+$/ { print $NF }' | sort -V | tail -1)
+          [ -n "$ref" ] || { echo "no storage release tag found"; exit 1; }
+          echo "newest storage tag: $ref"
+          git clone --depth 1 --branch "storage/$ref" \
+            https://github.com/containers/container-libs.git /tmp/container-libs
+          ./packaging/apply-driver.sh --module go.podman.io/storage \
+            /tmp/container-libs/storage ./driver
+          cd /tmp/container-libs/storage
           go build ./drivers/... ./pkg/archive/...
           go vet ./drivers/bcachefs/...
 
@@ -136,6 +155,45 @@ jobs:
         with:
           name: resolute-debs
           path: out/resolute/*.deb
+
+  trixie:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build bcachefs-enabled containers/storage (Debian 13)
+        run: podman build -f packaging/trixie/Containerfile.storage -o out/trixie/ .
+
+      # Trixie is the only target where apply-driver.sh omits both optional
+      # files, so it is the one that proves the omission still yields a driver.
+      - name: Verify driver landed in the -dev package
+        run: |
+          set -euo pipefail
+          dev=$(ls out/trixie/golang-github-containers-storage-dev_*+bcachefs1_all.deb)
+          contents=$(dpkg-deb -c "$dev")
+          for f in drivers/bcachefs/bcachefs.go \
+                   drivers/register/register_bcachefs.go \
+                   pkg/archive/changes_full.go; do
+            grep -qF -- "$f" <<<"$contents" || { echo "missing $f in $dev"; exit 1; }
+          done
+          echo "trixie: driver present in $dev"
+
+      - name: Rebuild podman against it
+        run: podman build -f packaging/trixie/Containerfile.podman -o out/trixie/ .
+
+      - name: Verify bcachefs is linked into the podman binary
+        run: |
+          set -euo pipefail
+          deb=$(ls out/trixie/podman_*+bcachefs1_amd64.deb)
+          dpkg-deb --fsys-tarfile "$deb" | tar -xO ./usr/bin/podman > /tmp/podman-bin
+          grep -qaF "${DRIVER_SYMBOL:?}" /tmp/podman-bin \
+            || { echo "bcachefs driver not linked into $deb"; exit 1; }
+          echo "trixie: $DRIVER_SYMBOL present in podman binary"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: trixie-debs
+          path: out/trixie/*.deb
 
   arch:
     runs-on: ubuntu-latest

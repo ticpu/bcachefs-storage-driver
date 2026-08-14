@@ -16,12 +16,14 @@ frees only what that layer actually added.
 ## What's here
 
 ```
-driver/                       canonical driver (storage >= 1.59)
+driver/                       canonical driver (storage >= 1.57)
 driver/syncmode.go            SyncMode(), applied only to storage >= 1.63
+driver/deferredremove.go      DeferredRemove(), applied only to storage >= 1.59
 packaging/apply-driver.sh     overlays driver/ onto a storage source tree
 packaging/arch/PKGBUILD       podman-bcachefs package
 packaging/noble/              Ubuntu 24.04 (storage 1.51.0)
 packaging/resolute/           Ubuntu 26.04 (storage 1.61.0)
+packaging/trixie/             Debian 13 (storage 1.57.2)
 scripts/test-snapshot-chain.sh   pure-CLI snapshot stress test (no Go)
 ```
 
@@ -31,24 +33,27 @@ patched storage library is not enough — podman must be recompiled against it.*
 
 ## Supported targets
 
-| Target | storage | Go module path | `SyncMode` |
-| --- | --- | --- | --- |
-| Ubuntu 24.04 (noble) | 1.51.0 | `github.com/containers/storage` | no |
-| Ubuntu 26.04 (resolute) | 1.61.0 | `go.podman.io/storage` | no |
-| Arch (podman 6.0.x) | 1.63.0 | `go.podman.io/storage` | yes |
-| container-libs `main` | 1.64.0-dev | `go.podman.io/storage` | yes |
+| Target | storage | Go module path | `DeferredRemove` | `SyncMode` |
+| --- | --- | --- | --- | --- |
+| Ubuntu 24.04 (noble) | 1.51.0 | `github.com/containers/storage` | no | no |
+| Debian 13 (trixie) | 1.57.2 | `github.com/containers/storage` | no | no |
+| Ubuntu 26.04 (resolute) | 1.61.0 | `go.podman.io/storage` | yes | no |
+| Arch (podman 6.0.x) | 1.63.0 | `go.podman.io/storage` | yes | yes |
+| container-libs `main` | 1.64.0 | `go.podman.io/storage` | yes | yes |
 
 storage renamed its module to `go.podman.io/storage` at 1.60, so
 `apply-driver.sh --module` rewrites imports for the newer targets. Noble keeps
 its own copy under `packaging/noble/driver/`: its `archive.FileInfo` has no
 `target` field, so symlink-target collection cannot be backported there.
 
-`SyncMode` is a *version* difference, not a fork difference. `ProtoDriver`
-gained a `SyncMode()` method in storage 1.63; before that the `SyncMode` type
-does not exist, so defining the method breaks the build. It therefore lives in
-its own `driver/syncmode.go`, and `apply-driver.sh` installs it only if the
-target tree declares the type. Nothing has to be configured per distro — the
-target is asked, and either mistake is a compile error, never a silent misbuild.
+The last two columns are *version* differences, not fork differences.
+`ProtoDriver` keeps gaining methods, and the types they name do not exist in
+older trees — `SyncMode` arrived in storage 1.63, the `internal/tempdir` package
+`DeferredRemove()` returns from in 1.59 — so defining them unconditionally breaks
+the build. Each lives in its own file under `driver/`, and `apply-driver.sh`
+installs it only if the target tree declares the method. Nothing has to be
+configured per distro — the target is asked, and either mistake is a compile
+error, never a silent misbuild.
 
 ## Building
 
@@ -61,10 +66,11 @@ cd packaging/arch && makepkg -sf
 sudo pacman -U podman-bcachefs-*.pkg.tar.zst
 ```
 
-Ubuntu. Build storage first, then podman against it — installing the `-dev` deb
-alone does nothing, because registration happens at compile time. Substitute
-`noble` for `resolute` on 24.04; keep the output directories separate, since the
-podman build picks its `-dev` deb out of them by glob:
+Debian/Ubuntu. Build storage first, then podman against it — installing the
+`-dev` deb alone does nothing, because registration happens at compile time.
+Substitute `noble` (24.04) or `trixie` (Debian 13) for `resolute`; keep the
+output directories separate, since the podman build picks its `-dev` deb out of
+them by glob:
 
 ```bash
 podman build -f packaging/resolute/Containerfile.storage -o out/resolute/ .
@@ -81,11 +87,11 @@ To take a security update, rebuild the new version through the Containerfiles
 
 ### Prebuilt packages
 
-Tagged releases carry prebuilt `.deb` (Noble, Resolute) and `.pkg.tar.zst`
-(Arch) packages with a `SHA256SUMS`, built and driver-verified by the same
-pipeline that gates CI. Releases are versioned for this repository, not for
-podman — one release spans three distros carrying three different podman
-versions. Cutting one is a tag push:
+Tagged releases carry prebuilt `.deb` (Noble, Resolute, Trixie) and
+`.pkg.tar.zst` (Arch) packages with a `SHA256SUMS`, built and driver-verified by
+the same pipeline that gates CI. Releases are versioned for this repository, not
+for podman — one release spans every distro, each carrying a different podman
+version. Cutting one is a tag push:
 
 ```bash
 git tag -s v1.1.0 -m 'podman 6.0.1 for Arch' && git push --tags
