@@ -18,11 +18,15 @@ jobs:
   lint:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           go-version: stable
+          # No go.mod at the repo root -- the driver is compiled inside a storage
+          # tree cloned at run time. setup-go keys its module cache off go.mod, so
+          # leaving caching on makes it hunt for a file that is not there.
+          cache: false
 
       - name: gofumpt
         run: |
@@ -49,11 +53,12 @@ jobs:
   vet:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           go-version: stable
+          cache: false
 
       # The btrfs graphdriver is cgo and needs its headers; building ./drivers/...
       # without them fails on btrfs/version.h, not on anything we ship.
@@ -88,7 +93,7 @@ jobs:
   noble:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Build bcachefs-enabled containers/storage (Ubuntu 24.04)
         run: podman build -f packaging/noble/Containerfile.storage -o out/noble/ .
@@ -126,7 +131,7 @@ jobs:
             || { echo "bcachefs driver not linked into $deb"; exit 1; }
           echo "noble: $DRIVER_SYMBOL present in podman binary"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: noble-debs
           path: out/noble/*.deb
@@ -134,7 +139,7 @@ jobs:
   resolute:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Build bcachefs-enabled containers/storage (Ubuntu 26.04)
         run: podman build -f packaging/resolute/Containerfile.storage -o out/resolute/ .
@@ -151,7 +156,7 @@ jobs:
             || { echo "bcachefs driver not linked into $deb"; exit 1; }
           echo "resolute: $DRIVER_SYMBOL present in podman binary"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: resolute-debs
           path: out/resolute/*.deb
@@ -159,7 +164,7 @@ jobs:
   trixie:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Build bcachefs-enabled containers/storage (Debian 13)
         run: podman build -f packaging/trixie/Containerfile.storage -o out/trixie/ .
@@ -190,7 +195,7 @@ jobs:
             || { echo "bcachefs driver not linked into $deb"; exit 1; }
           echo "trixie: $DRIVER_SYMBOL present in podman binary"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: trixie-debs
           path: out/trixie/*.deb
@@ -206,7 +211,7 @@ jobs:
             git go go-md2man apparmor btrfs-progs catatonit containers-common \
             gpgme libseccomp man-db shadow sqlite systemd binutils
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # makepkg refuses to run as root.
       #
@@ -249,7 +254,7 @@ jobs:
             || { echo "bcachefs driver not linked into $pkg"; exit 1; }
           echo "arch: $DRIVER_SYMBOL present in podman binary"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: arch-pkgs
           path: packaging/arch/*.pkg.tar.zst

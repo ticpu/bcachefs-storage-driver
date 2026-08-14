@@ -218,8 +218,23 @@ Cut a release with a signed tag; the workflow rebuilds, re-verifies the driver
 symbol, and publishes the packages with a `SHA256SUMS`:
 
 ```bash
-git tag -s vX.Y.Z -m '...' && git push --tags
+gh run watch "$(gh run list --branch main --limit 1 --json databaseId --jq '.[0].databaseId')" --exit-status
+git tag -s vX.Y.Z -F - <<'EOF'
+...
+EOF
+git push --tags
 ```
+
+**Never tag before main's own run is green.** A tag re-runs the same build, so a
+break that main would have caught surfaces as a failed release instead — with the
+tag already public. Tag messages carry a changelog for someone not following
+development, hence the heredoc rather than `-m`.
+
+Commits and tags are signed with the EC key on `jeromepoulin@gmail.com`, which is
+neither the global git identity nor the default signing key here; `.git/config`
+pins both. The hook that CLAUDE.md's repo conventions describe is **not installed
+in every clone** — check the author and key on the tip before pushing rather than
+trusting it to reject a wrong one.
 
 Releases are versioned for **this repository**, not for podman — one release spans
 every distro, each carrying a different podman version.

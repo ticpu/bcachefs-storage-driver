@@ -24,11 +24,11 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # Every artifact from the reusable build workflow (noble-debs,
       # resolute-debs, trixie-debs, arch-pkgs), each under its own subdirectory.
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           path: dist
 
