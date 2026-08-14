@@ -277,7 +277,7 @@ func TestGraphDiffApply(t *testing.T) {
 	require.NoError(t, d.Create("applied", "base", nil))
 	t.Cleanup(func() { d.Remove("applied") })
 
-	_, err = d.ApplyDiff("applied", "base", graphdriver.ApplyDiffOpts{
+	_, err = d.ApplyDiff("applied", graphdriver.ApplyDiffOpts{
 		Diff: diffArchive,
 	})
 	require.NoError(t, err)
@@ -398,7 +398,7 @@ func TestGraphDeepLayerDiffApply(t *testing.T) {
 
 		// Create new image layer and apply diff
 		require.NoError(t, d.Create(layer, parent, nil))
-		_, err = d.ApplyDiff(layer, parent, graphdriver.ApplyDiffOpts{Diff: diffArchive})
+		_, err = d.ApplyDiff(layer, graphdriver.ApplyDiffOpts{Diff: diffArchive})
 		require.NoError(t, err, "apply diff at layer %d", i)
 
 		// Verify seed files survive
