@@ -190,14 +190,11 @@ read-only and needs no checkout of the distro trees.
 ```bash
 BCACHEFS_TEST_ROOT=/path/on/bcachefs go test -v -run 'Subvolume|Chain' ./drivers/bcachefs/...
 sudo BCACHEFS_TEST_ROOT=... go test -v -run TestGraph ./drivers/bcachefs/...
-scripts/test-snapshot-chain.sh /path/on/bcachefs 50                          # no Go
 ```
 
 The subvolume ioctls need no privileges; it is `Init()`'s `mount.MakePrivate` and
 `chrootarchive` that make the `TestGraph*` set root-only. Hence the `-run` filter
 on the first line — an unfiltered run picks those up and fails on the bind mount.
-The shell stress test is pure bcachefs CLI: if it fails, it is a kernel bug, not
-ours.
 
 Tests only build against storage >= 1.62 (see the version matrix), so run them
 from a tree at that level or newer.

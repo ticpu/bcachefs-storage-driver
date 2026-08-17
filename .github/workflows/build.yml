@@ -39,10 +39,7 @@ jobs:
           fi
 
       - name: shell syntax
-        run: |
-          bash -n packaging/apply-driver.sh
-          bash -n scripts/test-snapshot-chain.sh
-          bash -n .github/release-notes.sh
+        run: git ls-files '*.sh' | xargs -n1 bash -n
 
   # Compile the driver against both ends of the range the canonical driver
   # covers: the oldest tree it is applied to (Trixie's 1.57) and the newest
