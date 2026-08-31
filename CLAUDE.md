@@ -44,13 +44,9 @@ because the target is a binary).
 
 ## Version matrix
 
-| Target | storage | module path | `DeferredRemove` | `SyncMode` |
-| --- | --- | --- | --- | --- |
-| noble | 1.51.0 | `github.com/containers/storage` | no | no |
-| trixie | 1.57.2 | `github.com/containers/storage` | no | no |
-| resolute | 1.61.0 | `go.podman.io/storage` | yes | no |
-| Arch (podman 6.0.x) | 1.63.0 | `go.podman.io/storage` | yes | yes |
-| container-libs `main` | 1.64.0 | `go.podman.io/storage` | yes | yes |
+Which storage version each target carries, and which optional methods it takes,
+lives in README.md under "Supported targets". Keep it there and update it on
+every distro bump — it is the only copy.
 
 storage renamed its module to `go.podman.io/storage` at 1.60, hence
 `apply-driver.sh --module`.
