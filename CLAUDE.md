@@ -208,7 +208,11 @@ pinning one, so upstream API drift turns CI red on the next run instead of on th
 next distro bump.
 
 Cut a release with a signed tag; the workflow rebuilds, re-verifies the driver
-symbol, and publishes the packages with a `SHA256SUMS`:
+symbol, and uploads the packages with a `SHA256SUMS` as a **draft**.
+`sign-release.sh` then detach-signs every asset locally and flips the release
+public — the signing key never reaches CI, and GitHub refuses asset changes on a
+published release once immutability is on, so the signatures have to land while
+it is still a draft:
 
 ```bash
 gh run watch "$(gh run list --branch main --limit 1 --json databaseId --jq '.[0].databaseId')" --exit-status
@@ -216,7 +220,11 @@ git tag -s vX.Y.Z -F - <<'EOF'
 ...
 EOF
 git push --tags
+./sign-release.sh vX.Y.Z
 ```
+
+The AUR `podman-bcachefs-bin` package verifies those `.asc` files, so a release
+left unsigned is a release it cannot consume.
 
 **Never tag before main's own run is green.** A tag re-runs the same build, so a
 break that main would have caught surfaces as a failed release instead — with the

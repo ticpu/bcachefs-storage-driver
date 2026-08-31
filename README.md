@@ -89,12 +89,22 @@ To take a security update, rebuild the new version through the Containerfiles
 
 Tagged releases carry prebuilt `.deb` (Noble, Resolute, Trixie) and
 `.pkg.tar.zst` (Arch) packages with a `SHA256SUMS`, built and driver-verified by
-the same pipeline that gates CI. Releases are versioned for this repository, not
-for podman — one release spans every distro, each carrying a different podman
-version. Cutting one is a tag push:
+the same pipeline that gates CI. Every asset is detach-signed; verify one with
+`gpg --verify <asset>.asc <asset>` against key
+`E5998E49DC9E1DCFDB9B46EC77EBA10790CFFCCD`. Releases are versioned for this
+repository, not for podman — one release spans every distro, each carrying a
+different podman version. Cutting one is a tag push followed by a local signing
+pass, which is also what makes the release public:
 
 ```bash
 git tag -s v1.1.0 -m 'podman 6.0.1 for Arch' && git push --tags
+./sign-release.sh v1.1.0
+```
+
+Arch users can take the Arch package from the AUR instead of building it:
+
+```bash
+paru -S podman-bcachefs-bin
 ```
 
 Enable it in `/etc/containers/storage.conf`:

@@ -63,10 +63,13 @@ jobs:
           set -euo pipefail
           tag="${{ inputs.tag || github.ref_name }}"
 
+          # Left as a draft: sign-release.sh detach-signs the assets locally and
+          # publishes. The signing key never reaches CI, and immutable releases
+          # refuse asset changes once published.
           if gh release view "$tag" >/dev/null 2>&1; then
             gh release upload "$tag" release/* --clobber
             gh release edit "$tag" --notes-file NOTES.md
           else
             gh release create "$tag" release/* \
-              --title "$tag" --notes-file NOTES.md
+              --draft --title "$tag" --notes-file NOTES.md
           fi
