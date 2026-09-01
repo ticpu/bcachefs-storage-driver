@@ -51,7 +51,8 @@ jobs:
           find dist -type f -name '*.deb' ! -name '*debug*' ! -name '*dbgsym*' -printf '%h\t%f\n' \
             | sed -E 's|^dist/([^/-]+)-debs\t|\1\t|' \
             | jq -Rn '[inputs | split("\t") | {file: .[1], suite: .[0]}]' > release/manifest.json
-          jq -e 'length > 0 and all(.[].suite | test("^[a-z]+$"))' release/manifest.json > /dev/null
+          # all/1 iterates already; all(.[].suite | ...) would index each element twice.
+          jq -e 'length > 0 and all(.suite | test("^[a-z]+$"))' release/manifest.json > /dev/null
           cat release/manifest.json
 
           ( cd release && sha256sum -- * > SHA256SUMS )
