@@ -27,7 +27,9 @@ if [[ -z "$TAG" ]]; then
     fi
 fi
 
-KEY=$(git config user.signingkey)
+# `|| true` because git exits non-zero when the key is unset, and under set -e
+# that kills the script before it can say why.
+KEY=$(git config user.signingkey || true)
 if [[ -z "$KEY" ]]; then
     echo "git config user.signingkey is unset: refusing to guess a signing key" >&2
     exit 1
