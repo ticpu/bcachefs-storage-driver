@@ -45,6 +45,15 @@ jobs:
           echo "assembled $count package(s):"
           ls -1 release
 
+          # Which suite each .deb belongs to. podman and containers-storage are
+          # rebuilt per distro and carry that distro's upstream version, so the
+          # filenames cannot be told apart; only the artifact directory knows.
+          find dist -type f -name '*.deb' ! -name '*debug*' ! -name '*dbgsym*' -printf '%h\t%f\n' \
+            | sed -E 's|^dist/([^/-]+)-debs\t|\1\t|' \
+            | jq -Rn '[inputs | split("\t") | {file: .[1], suite: .[0]}]' > release/manifest.json
+          jq -e 'length > 0 and all(.[].suite | test("^[a-z]+$"))' release/manifest.json > /dev/null
+          cat release/manifest.json
+
           ( cd release && sha256sum -- * > SHA256SUMS )
 
       # Notes carry the exact filenames just built, so the install snippets never
