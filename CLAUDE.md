@@ -230,8 +230,20 @@ git push --tags
 ./sign-release.sh vX.Y.Z
 ```
 
-The AUR `podman-bcachefs-bin` package verifies those `.asc` files, so a release
-left unsigned is a release it cannot consume.
+Signing publishes the release but does not deliver it. Two consumers pull from
+it, and a release that stops here reaches nobody who installed the documented
+way:
+
+```bash
+cd ~/GIT/apt-ticpu-net && ./ingest.sh bcachefs-storage-driver vX.Y.Z
+```
+
+and the AUR `podman-bcachefs-bin`, in `~/.cache/paru/clone/podman-bcachefs-bin/`:
+bump `pkgver` to the new podman version and `_reltag` to the new tag, put the
+artifact's sha256 from the release's `SHA256SUMS` in `sha256sums[0]`,
+`makepkg --printsrcinfo > .SRCINFO`, commit both and push. `_binrel` moves only
+if the Arch package's own `pkgrel` did. That package verifies the `.asc`, so a
+release left unsigned is one it cannot consume.
 
 **Never tag before main's own run is green.** A tag re-runs the same build, so a
 break that main would have caught surfaces as a failed release instead — with the
@@ -247,11 +259,10 @@ trusting it to reject a wrong one.
 Releases are versioned for **this repository**, not for podman — one release spans
 every distro, each carrying a different podman version.
 
-`.github/release-notes.sh` generates the notes from the artifact directories, so
-the install snippets carry the exact filenames just built (package names embed
-upstream versions and change every bump). It hard-errors if a platform yields no
-packages: a release whose install script silently lists nothing is worse than a
-failed build.
+`.github/release-notes.sh` writes install instructions that name no files at all
+— apt.ticpu.net and the AUR, four lines each. It still reads the artifact
+directories, and hard-errors if any platform yielded no packages: notes
+describing packages that were never built are worse than a failed build.
 
 The Arch CI job passes `--nocheck`. The PKGBUILD's `check()` gates podman's
 vendored container-libs against the *system* containers-common, which on a rolling
