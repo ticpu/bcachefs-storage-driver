@@ -20,6 +20,7 @@ driver/                       canonical driver (storage >= 1.57)
 driver/syncmode.go            SyncMode(), applied only to storage >= 1.63
 driver/deferredremove.go      DeferredRemove(), applied only to storage >= 1.59
 packaging/apply-driver.sh     overlays driver/ onto a storage source tree
+packaging/patches/            distro patches that are not about the driver
 packaging/arch/PKGBUILD       podman-bcachefs package
 packaging/noble/              Ubuntu 24.04 (storage 1.51.0)
 packaging/resolute/           Ubuntu 26.04 (storage 1.61.0)
@@ -130,6 +131,10 @@ The graphroot must be on a bcachefs filesystem; the driver refuses to
 initialize otherwise.
 
 ## It works — here's the proof
+
+Every `.deb` and `.pkg.tar.zst` this repository ships was built by a podman
+running this driver, on a bcachefs graphroot. The packages that install the
+driver are produced by the driver.
 
 Pull a multi-layer image into a bcachefs graphroot:
 

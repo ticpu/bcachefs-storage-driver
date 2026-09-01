@@ -14,6 +14,7 @@ driver/                     canonical driver (storage >= 1.57)
 driver/syncmode.go          SyncMode(), applied only to storage >= 1.63
 driver/deferredremove.go    DeferredRemove(), applied only to storage >= 1.59
 packaging/apply-driver.sh   overlays driver/ onto an unpacked storage tree
+packaging/patches/          distro patches that are not about the driver
 packaging/arch/             PKGBUILD + storage.conf.d drop-in
 packaging/noble/            Containerfiles + a v1.51-specific driver copy
 packaging/resolute/         Containerfiles only
@@ -131,6 +132,30 @@ driver and overrides the config back — that is what `User-selected graph drive
 "overlay" overwritten by ... from database` means. It is podman reporting that the
 config lost.
 
+## The carried containers/image patch
+
+`packaging/patches/multiscope-auth-scope.patch` has nothing to do with bcachefs.
+It fixes a registry auth-scope parser that cannot read the multi-scope challenge
+a cross-repo blob mount provokes, which breaks `podman push` against GitLab. It
+is here because this repository is where the affected hosts get their podman.
+
+Trixie and resolute build a patched `golang-github-containers-image` from
+`Containerfile.image` and link podman against it, which is why their podman
+carries `+bcachefs2` while noble stays at `+bcachefs1`. Noble is untouched: its
+containers/image is far enough back that the port stops being mechanical, and
+nobody there has hit the bug.
+
+**One patch serves both suites, and it must stay that way.** It is generated with
+one line of context on purpose — at three lines the hunk swallows the loop header
+of `needsRetryWithUpdatedScope`, which trixie spells `parseAuthHeader` and
+resolute `iterateAuthHeader`, and the single file becomes two that drift. If a
+future suite fails to apply it, cut context further before copying the file.
+
+**Drop it when [PR 1130](https://github.com/podman-container-tools/container-libs/pull/1130)
+merges and reaches both suites.** Then `Containerfile.image` goes, the podman
+suffix returns to `+bcachefs1`, and `AUTH_SCOPE_SYMBOL` comes out of `build.yml`.
+Check it in the same pass as the rest of "Checking upstream" below.
+
 ## Debian/Ubuntu: version ordering does not protect these packages
 
 The `+bcachefs1` suffix only outranks the archive while the base version matches;
@@ -173,7 +198,10 @@ read-only and needs no checkout of the distro trees.
    `golang-github-containers-storage`); `gh api repos/podman-container-tools/podman/releases/latest`
    for what Arch will pin next. Only Arch carries a version in this repo — the
    Containerfiles re-derive from `apt-get source` and need no bump.
-5. **Upstream PR.** `gh pr view 518 --repo containers/container-libs`.
+5. **Upstream PRs.** `gh pr view 518 --repo podman-container-tools/container-libs`
+   for the driver, and `gh pr view 1130` for the carried auth-scope patch — once
+   1130 merges and the suites pick it up, that patch and `Containerfile.image`
+   come out.
 
 ## Implementation notes
 

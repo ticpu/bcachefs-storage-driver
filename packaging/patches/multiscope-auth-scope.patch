@@ -1,0 +1,283 @@
+Description: docker: parse multi-scope insufficient_scope challenges
+ A cross-repo blob mount makes the registry demand a token covering both the
+ destination and the source repository, so its WWW-Authenticate: Bearer
+ challenge carries a scope with two space-separated tokens, e.g.
+ "repository:group/dest:pull,push repository:other/src:pull".
+ .
+ parseAuthScope split the whole value on ':' and required exactly three
+ fields, so any multi-scope challenge failed to parse; the client then never
+ re-requested a correctly scoped token and the push failed. parseAuthScopes
+ splits on whitespace per the distribution token-auth spec and parses each
+ token, and the request path carries the whole set.
+ .
+ Drop this patch once the forwarded PR lands and reaches the archive: the
+ Containerfile stops applying it and the podman suffix goes back to a plain
+ rebuild.
+ .
+ Generated with one line of context on purpose. Three lines pulls in the
+ loop header of needsRetryWithUpdatedScope, which trixie spells with
+ parseAuthHeader and resolute with iterateAuthHeader; at one line the same
+ patch applies to both and there is no per-suite copy to keep in step.
+Author: Jérôme Poulin <jeromepoulin@gmail.com>
+Origin: upstream, https://github.com/podman-container-tools/container-libs/pull/1130
+Bug: https://github.com/containers/image/issues/1972
+Bug: https://github.com/containers/podman/issues/19363
+Bug: https://gitlab.com/gitlab-org/gitlab/-/issues/414402
+Forwarded: https://github.com/podman-container-tools/container-libs/pull/1130
+Last-Update: 2026-09-01
+---
+--- a/docker/wwwauthenticate.go
+--- a/docker/wwwauthenticate.go
++++ b/docker/wwwauthenticate.go
+@@ -85,2 +85,21 @@
+ 
++// parseAuthScopes parses an authentication scope value, which per the distribution
++// token-auth spec is a space-separated list of scope strings. A cross-repo blob mount
++// makes the registry ask for a token covering both repositories, so a challenge
++// carrying more than one is normal rather than malformed.
++func parseAuthScopes(scopeStr string) ([]authScope, error) {
++	scopes := []authScope{}
++	for _, fragment := range strings.Fields(scopeStr) {
++		scope, err := parseAuthScope(fragment)
++		if err != nil {
++			return nil, err
++		}
++		scopes = append(scopes, *scope)
++	}
++	if len(scopes) == 0 {
++		return nil, fmt.Errorf("error parsing auth scope: '%s'", scopeStr)
++	}
++	return scopes, nil
++}
++
+ // NOTE: This is not a fully compliant parser per RFC 7235:
+--- a/docker/docker_client.go
++++ b/docker/docker_client.go
+@@ -453,3 +453,3 @@
+ // The host name and schema is taken from the client or autodetected, and the path is relative to it, i.e. the path usually starts with /v2/.
+-func (c *dockerClient) makeRequest(ctx context.Context, method, path string, headers map[string][]string, stream io.Reader, auth sendAuth, extraScope *authScope) (*http.Response, error) {
++func (c *dockerClient) makeRequest(ctx context.Context, method, path string, headers map[string][]string, stream io.Reader, auth sendAuth, extraScopes []authScope) (*http.Response, error) {
+ 	if err := c.detectProperties(ctx); err != nil {
+@@ -462,3 +462,3 @@
+ 	}
+-	return c.makeRequestToResolvedURL(ctx, method, requestURL, headers, stream, -1, auth, extraScope)
++	return c.makeRequestToResolvedURL(ctx, method, requestURL, headers, stream, -1, auth, extraScopes)
+ }
+@@ -479,3 +479,3 @@
+ // returns the required scope to be used for fetching a new token.
+-func needsRetryWithUpdatedScope(res *http.Response) (bool, *authScope) {
++func needsRetryWithUpdatedScope(res *http.Response) (bool, []authScope) {
+ 	if res.StatusCode == http.StatusUnauthorized {
+@@ -486,4 +486,4 @@
+ 					if scope, ok := challenge.Parameters["scope"]; ok && scope != "" {
+-						if newScope, err := parseAuthScope(scope); err == nil {
+-							return true, newScope
++						if newScopes, err := parseAuthScopes(scope); err == nil {
++							return true, newScopes
+ 						} else {
+@@ -534,3 +534,3 @@
+ // TODO(runcom): too many arguments here, use a struct
+-func (c *dockerClient) makeRequestToResolvedURL(ctx context.Context, method string, requestURL *url.URL, headers map[string][]string, stream io.Reader, streamLen int64, auth sendAuth, extraScope *authScope) (*http.Response, error) {
++func (c *dockerClient) makeRequestToResolvedURL(ctx context.Context, method string, requestURL *url.URL, headers map[string][]string, stream io.Reader, streamLen int64, auth sendAuth, extraScopes []authScope) (*http.Response, error) {
+ 	delay := backoffInitialDelay
+@@ -538,3 +538,3 @@
+ 	for {
+-		res, err := c.makeRequestToResolvedURLOnce(ctx, method, requestURL, headers, stream, streamLen, auth, extraScope)
++		res, err := c.makeRequestToResolvedURLOnce(ctx, method, requestURL, headers, stream, streamLen, auth, extraScopes)
+ 		if err != nil {
+@@ -557,9 +557,6 @@
+ 		if attempts == 1 && stream == nil && auth != noAuth {
+-			if retry, newScope := needsRetryWithUpdatedScope(res); retry {
++			if retry, newScopes := needsRetryWithUpdatedScope(res); retry {
+ 				logrus.Debug("Detected insufficient_scope error, will retry request with updated scope")
+ 				res.Body.Close()
+-				// Note: This retry ignores extraScope. That’s, strictly speaking, incorrect, but we don’t currently
+-				// expect the insufficient_scope errors to happen for those callers. If that changes, we can add support
+-				// for more than one extra scope.
+-				res, err = c.makeRequestToResolvedURLOnce(ctx, method, requestURL, headers, stream, streamLen, auth, newScope)
++				res, err = c.makeRequestToResolvedURLOnce(ctx, method, requestURL, headers, stream, streamLen, auth, newScopes)
+ 				if err != nil {
+@@ -567,3 +564,3 @@
+ 				}
+-				extraScope = newScope
++				extraScopes = newScopes
+ 			}
+@@ -595,3 +592,3 @@
+ // Note that no exponential back off is performed when receiving an http 429 status code.
+-func (c *dockerClient) makeRequestToResolvedURLOnce(ctx context.Context, method string, resolvedURL *url.URL, headers map[string][]string, stream io.Reader, streamLen int64, auth sendAuth, extraScope *authScope) (*http.Response, error) {
++func (c *dockerClient) makeRequestToResolvedURLOnce(ctx context.Context, method string, resolvedURL *url.URL, headers map[string][]string, stream io.Reader, streamLen int64, auth sendAuth, extraScopes []authScope) (*http.Response, error) {
+ 	req, err := http.NewRequestWithContext(ctx, method, resolvedURL.String(), stream)
+@@ -611,3 +608,3 @@
+ 	if auth == v2Auth {
+-		if err := c.setupRequestAuth(req, extraScope); err != nil {
++		if err := c.setupRequestAuth(req, extraScopes); err != nil {
+ 			return nil, err
+@@ -701,3 +698,3 @@
+ // debugging: https://github.com/containers/image/pull/211#issuecomment-273426236 and follows up
+-func (c *dockerClient) setupRequestAuth(req *http.Request, extraScope *authScope) error {
++func (c *dockerClient) setupRequestAuth(req *http.Request, extraScopes []authScope) error {
+ 	if len(c.challenges) == 0 {
+@@ -715,14 +712,15 @@
+ 			if registryToken == "" {
+-				cacheKey := ""
+-				scopes := []authScope{c.scope}
+-				if extraScope != nil {
+-					// Using ':' as a separator here is unambiguous because getBearerToken below
+-					// uses the same separator when formatting a remote request (and because
+-					// repository names that we create can't contain colons, and extraScope values
+-					// coming from a server come from `parseAuthScope`, which also splits on colons).
+-					cacheKey = fmt.Sprintf("%s:%s:%s", extraScope.resourceType, extraScope.remoteName, extraScope.actions)
+-					if colonCount := strings.Count(cacheKey, ":"); colonCount != 2 {
++				// Using ':' as a separator here is unambiguous because getBearerToken below
++				// uses the same separator when formatting a remote request (and because
++				// repository names that we create can't contain colons, and extraScopes values
++				// coming from a server come from `parseAuthScope`, which also splits on colons).
++				// The whole set keys the cache, so a token good for one set is never reused for
++				// another.
++				cacheKeyParts := make([]string, 0, len(extraScopes))
++				for _, extraScope := range extraScopes {
++					part := fmt.Sprintf("%s:%s:%s", extraScope.resourceType, extraScope.remoteName, extraScope.actions)
++					if colonCount := strings.Count(part, ":"); colonCount != 2 {
+ 						return fmt.Errorf(
+ 							"Internal error: there must be exactly 2 colons in the cacheKey ('%s') but got %d",
+-							cacheKey,
++							part,
+ 							colonCount,
+@@ -730,4 +728,6 @@
+ 					}
+-					scopes = append(scopes, *extraScope)
++					cacheKeyParts = append(cacheKeyParts, part)
+ 				}
++				cacheKey := strings.Join(cacheKeyParts, " ")
++				scopes := append([]authScope{c.scope}, extraScopes...)
+ 				var token bearerToken
+--- a/docker/docker_image_dest.go
++++ b/docker/docker_image_dest.go
+@@ -232,3 +232,3 @@
+ // it returns a non-nil error only on an unexpected failure.
+-func (d *dockerImageDestination) blobExists(ctx context.Context, repo reference.Named, digest digest.Digest, extraScope *authScope) (bool, int64, error) {
++func (d *dockerImageDestination) blobExists(ctx context.Context, repo reference.Named, digest digest.Digest, extraScopes []authScope) (bool, int64, error) {
+ 	if err := digest.Validate(); err != nil { // Make sure digest.String() does not contain any unexpected characters
+@@ -238,3 +238,3 @@
+ 	logrus.Debugf("Checking %s", checkPath)
+-	res, err := d.c.makeRequest(ctx, http.MethodHead, checkPath, nil, nil, v2Auth, extraScope)
++	res, err := d.c.makeRequest(ctx, http.MethodHead, checkPath, nil, nil, v2Auth, extraScopes)
+ 	if err != nil {
+@@ -259,3 +259,3 @@
+ // mountBlob tries to mount blob srcDigest from srcRepo to the current destination.
+-func (d *dockerImageDestination) mountBlob(ctx context.Context, srcRepo reference.Named, srcDigest digest.Digest, extraScope *authScope) error {
++func (d *dockerImageDestination) mountBlob(ctx context.Context, srcRepo reference.Named, srcDigest digest.Digest, extraScopes []authScope) error {
+ 	u := url.URL{
+@@ -268,3 +268,3 @@
+ 	logrus.Debugf("Trying to mount %s", u.Redacted())
+-	res, err := d.c.makeRequest(ctx, http.MethodPost, u.String(), nil, nil, v2Auth, extraScope)
++	res, err := d.c.makeRequest(ctx, http.MethodPost, u.String(), nil, nil, v2Auth, extraScopes)
+ 	if err != nil {
+@@ -286,3 +286,3 @@
+ 		logrus.Debugf("... started an upload instead of mounting, trying to cancel at %s", uploadLocation.Redacted())
+-		res2, err := d.c.makeRequestToResolvedURL(ctx, http.MethodDelete, uploadLocation, nil, nil, -1, v2Auth, extraScope)
++		res2, err := d.c.makeRequestToResolvedURL(ctx, http.MethodDelete, uploadLocation, nil, nil, -1, v2Auth, extraScopes)
+ 		if err != nil {
+@@ -409,3 +409,3 @@
+ 		// expanded token scope.
+-		extraScope := &authScope{
++		extraScopes := []authScope{{
+ 			resourceType: "repository",
+@@ -413,3 +413,3 @@
+ 			actions:      "pull",
+-		}
++		}}
+ 		// This existence check is not, strictly speaking, necessary: We only _really_ need it to get the blob size, and we could record that in the cache instead.
+@@ -421,3 +421,3 @@
+ 		// so, be a nice client and don't create unnecessary upload sessions on the server.
+-		exists, size, err := d.blobExists(ctx, candidateRepo, candidate.Digest, extraScope)
++		exists, size, err := d.blobExists(ctx, candidateRepo, candidate.Digest, extraScopes)
+ 		if err != nil {
+@@ -431,3 +431,3 @@
+ 		if candidateRepo.Name() != d.ref.ref.Name() {
+-			if err := d.mountBlob(ctx, candidateRepo, candidate.Digest, extraScope); err != nil {
++			if err := d.mountBlob(ctx, candidateRepo, candidate.Digest, extraScopes); err != nil {
+ 				logrus.Debugf("... Mount failed: %v", err)
+--- a/docker/docker_client_test.go
++++ b/docker/docker_client_test.go
+@@ -12,2 +12,3 @@
+ 	"path/filepath"
++	"slices"
+ 	"strings"
+@@ -213,3 +214,3 @@
+ 
+-	needsRetry, scope := needsRetryWithUpdatedScope(&resp)
++	needsRetry, scopes := needsRetryWithUpdatedScope(&resp)
+ 
+@@ -219,4 +220,25 @@
+ 
+-	if expectedScope != *scope {
+-		t.Fatalf("Got an invalid scope, expected '%q' but got '%q'", expectedScope, *scope)
++	if len(scopes) != 1 || expectedScope != scopes[0] {
++		t.Fatalf("Got an invalid scope, expected '%q' but got '%q'", expectedScope, scopes)
++	}
++}
++
++func TestNeedsRetryOnInsuficientScopeMultiScope(t *testing.T) {
++	resp := registrySuseComResp
++	resp.Header["Www-Authenticate"] = []string{
++		`Bearer realm="https://registry.suse.com/auth",service="SUSE Linux Docker Registry",scope="repository:group/dest:pull,push repository:other/src:pull",error="insufficient_scope"`,
++	}
++	expectedScopes := []authScope{
++		{resourceType: "repository", remoteName: "group/dest", actions: "pull,push"},
++		{resourceType: "repository", remoteName: "other/src", actions: "pull"},
++	}
++
++	needsRetry, scopes := needsRetryWithUpdatedScope(&resp)
++
++	if !needsRetry {
++		t.Fatal("Expected needing to retry")
++	}
++
++	if !slices.Equal(expectedScopes, scopes) {
++		t.Fatalf("Got an invalid scope, expected '%q' but got '%q'", expectedScopes, scopes)
+ 	}
+--- a/docker/wwwauthenticate_test.go
++++ b/docker/wwwauthenticate_test.go
+@@ -6,2 +6,3 @@
+ 	"github.com/stretchr/testify/assert"
++	"github.com/stretchr/testify/require"
+ )
+@@ -44,2 +45,37 @@
+ 	}
++}
++
++func TestParseAuthScopes(t *testing.T) {
++	for _, c := range []struct {
++		input    string
++		expected []authScope // nil if a parse failure is expected
++	}{
++		{
++			input:    "repository:group/dest:pull,push",
++			expected: []authScope{{resourceType: "repository", remoteName: "group/dest", actions: "pull,push"}},
++		},
++		{
++			// A cross-repo blob mount asks for both repositories at once.
++			input: "repository:group/dest:pull,push repository:other/src:pull",
++			expected: []authScope{
++				{resourceType: "repository", remoteName: "group/dest", actions: "pull,push"},
++				{resourceType: "repository", remoteName: "other/src", actions: "pull"},
++			},
++		},
++		{
++			input:    "registry:catalog:*",
++			expected: []authScope{{resourceType: "registry", remoteName: "catalog", actions: "*"}},
++		},
++		{input: "", expected: nil},
++		{input: "foo:bar", expected: nil},
++		{input: "repository:group/dest:pull,push foo:bar", expected: nil},
++	} {
++		scopes, err := parseAuthScopes(c.input)
++		if c.expected == nil {
++			assert.Error(t, err, c.input)
++		} else {
++			require.NoError(t, err, c.input)
++			assert.Equal(t, c.expected, scopes, c.input)
++		}
++	}
+ }

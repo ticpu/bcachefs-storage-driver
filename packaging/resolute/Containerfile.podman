@@ -25,14 +25,18 @@ WORKDIR /build
 # 1.61.0+ds1-N+bcachefs1 outranks the archive's 1.61.0+ds1-N, so installing it
 # first satisfies podman's "storage-dev (>= 1.61)" build-dep with no downgrade.
 COPY out/resolute/golang-github-containers-storage-dev_*.deb /build/
+COPY out/resolute/golang-github-containers-image-dev_*.deb /build/
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ./golang-github-containers-storage-dev_*.deb \
-    && rm -f /build/golang-github-containers-storage-dev_*.deb \
+    && apt-get install -y --no-install-recommends \
+        ./golang-github-containers-storage-dev_*.deb \
+        ./golang-github-containers-image-dev_*.deb \
+    && rm -f /build/golang-github-containers-storage-dev_*.deb /build/golang-github-containers-image-dev_*.deb \
     && apt-get source podman \
     && mk-build-deps -i -t 'apt-get -y --no-install-recommends' podman-*/debian/control \
     && rm -f *build-deps*.deb \
     && dpkg-query -W -f='${Version}\n' golang-github-containers-storage-dev | grep -q '+bcachefs1' \
+    && dpkg-query -W -f='${Version}\n' golang-github-containers-image-dev | grep -q '+bcachefs1' \
     && rm -rf /var/lib/apt/lists/*
 
 FROM builder-deps AS builder
@@ -46,9 +50,9 @@ ENV DEBEMAIL=jeromepoulin@gmail.com \
 
 RUN set -e && \
     cd podman-* && \
-    debchange --newversion "$(dpkg-parsechangelog -S Version)+bcachefs1" \
+    debchange --newversion "$(dpkg-parsechangelog -S Version)+bcachefs2" \
         --distribution resolute \
-        "Rebuild against bcachefs-enabled containers/storage" && \
+        "Rebuild against bcachefs-enabled containers/storage and multi-scope-fixed containers/image" && \
     dpkg-buildpackage -us -uc -b
 
 FROM scratch AS output

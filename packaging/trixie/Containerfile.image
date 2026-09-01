@@ -1,0 +1,59 @@
+# Build a containers/image for Debian 13 (Trixie) carrying the multi-scope
+# auth-scope fix.
+#
+# Unrelated to bcachefs: podman pushing to a registry that answers a cross-repo
+# blob mount with a multi-scope challenge fails to parse it and never retries
+# with a usable token. It is carried here because this is where the affected
+# hosts get their podman. packaging/patches/multiscope-auth-scope.patch names
+# the condition to drop it.
+#
+#   podman build -f packaging/trixie/Containerfile.image -o out/trixie/ .
+
+FROM docker.io/library/debian:trixie AS builder-base
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    dpkg-dev \
+    devscripts \
+    equivs \
+    fakeroot \
+    quilt \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+FROM builder-base AS builder-deps
+
+RUN sed -i 's/^Types: deb$/Types: deb deb-src/' /etc/apt/sources.list.d/debian.sources
+
+WORKDIR /build
+RUN apt-get update \
+    && apt-get source golang-github-containers-image \
+    && mk-build-deps -i -t 'apt-get -y --no-install-recommends' golang-github-containers-image-*/debian/control \
+    && rm -f *build-deps*.deb \
+    && rm -rf /var/lib/apt/lists/*
+
+FROM builder-deps AS builder
+
+RUN useradd --create-home builder && chown -R builder:builder /build
+
+COPY --chown=builder:builder packaging/patches/multiscope-auth-scope.patch /build/
+
+USER builder
+WORKDIR /build
+ENV DEBEMAIL=jeromepoulin@gmail.com \
+    DEBFULLNAME="Jérôme Poulin" \
+    QUILT_PATCHES=debian/patches
+
+# Appended to debian/patches rather than applied to the tree, so the package
+# records the change the way it records every other distro patch.
+RUN set -e && \
+    cd golang-github-containers-image-* && \
+    cp /build/multiscope-auth-scope.patch debian/patches/ && \
+    echo multiscope-auth-scope.patch >> debian/patches/series && \
+    quilt push -a && \
+    debchange --newversion "$(dpkg-parsechangelog -S Version)+bcachefs1" \
+        --distribution trixie \
+        "Parse multi-scope insufficient_scope challenges" && \
+    dpkg-buildpackage -us -uc -b
+
+FROM scratch AS output
+COPY --from=builder /build/*.deb /

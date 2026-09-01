@@ -13,6 +13,8 @@ env:
   # `grep -qaF "${DRIVER_SYMBOL:?}"`: an unset var would make `grep -q` match
   # anything and turn the assertion into a silent no-op.
   DRIVER_SYMBOL: storage/drivers/bcachefs.diffDriver.ApplyDiff
+  # Only exists in a containers/image carrying packaging/patches/multiscope-auth-scope.patch.
+  AUTH_SCOPE_SYMBOL: parseAuthScopes
 
 jobs:
   lint:
@@ -141,17 +143,22 @@ jobs:
       - name: Build bcachefs-enabled containers/storage (Ubuntu 26.04)
         run: podman build -f packaging/resolute/Containerfile.storage -o out/resolute/ .
 
-      - name: Rebuild podman against it
+      - name: Build multi-scope-fixed containers/image (Ubuntu 26.04)
+        run: podman build -f packaging/resolute/Containerfile.image -o out/resolute/ .
+
+      - name: Rebuild podman against them
         run: podman build -f packaging/resolute/Containerfile.podman -o out/resolute/ .
 
-      - name: Verify bcachefs is linked into the podman binary
+      - name: Verify bcachefs and the auth-scope fix are linked into podman
         run: |
           set -euo pipefail
-          deb=$(ls out/resolute/podman_*+bcachefs1_amd64.deb)
+          deb=$(ls out/resolute/podman_*+bcachefs2_amd64.deb)
           dpkg-deb --fsys-tarfile "$deb" | tar -xO ./usr/bin/podman > /tmp/podman-bin
           grep -qaF "${DRIVER_SYMBOL:?}" /tmp/podman-bin \
             || { echo "bcachefs driver not linked into $deb"; exit 1; }
-          echo "resolute: $DRIVER_SYMBOL present in podman binary"
+          grep -qaF "${AUTH_SCOPE_SYMBOL:?}" /tmp/podman-bin \
+            || { echo "multi-scope auth fix not linked into $deb"; exit 1; }
+          echo "resolute: $DRIVER_SYMBOL and $AUTH_SCOPE_SYMBOL present in podman binary"
 
       - uses: actions/upload-artifact@v7
         with:
@@ -180,17 +187,25 @@ jobs:
           done
           echo "trixie: driver present in $dev"
 
-      - name: Rebuild podman against it
+      - name: Build multi-scope-fixed containers/image (Debian 13)
+        run: podman build -f packaging/trixie/Containerfile.image -o out/trixie/ .
+
+      - name: Rebuild podman against them
         run: podman build -f packaging/trixie/Containerfile.podman -o out/trixie/ .
 
-      - name: Verify bcachefs is linked into the podman binary
+      # Both patches have to survive into the same binary: the driver, and the
+      # auth-scope parser the runners depend on. A rebuild that quietly linked
+      # the archive's containers/image would pass every other check here.
+      - name: Verify bcachefs and the auth-scope fix are linked into podman
         run: |
           set -euo pipefail
-          deb=$(ls out/trixie/podman_*+bcachefs1_amd64.deb)
+          deb=$(ls out/trixie/podman_*+bcachefs2_amd64.deb)
           dpkg-deb --fsys-tarfile "$deb" | tar -xO ./usr/bin/podman > /tmp/podman-bin
           grep -qaF "${DRIVER_SYMBOL:?}" /tmp/podman-bin \
             || { echo "bcachefs driver not linked into $deb"; exit 1; }
-          echo "trixie: $DRIVER_SYMBOL present in podman binary"
+          grep -qaF "${AUTH_SCOPE_SYMBOL:?}" /tmp/podman-bin \
+            || { echo "multi-scope auth fix not linked into $deb"; exit 1; }
+          echo "trixie: $DRIVER_SYMBOL and $AUTH_SCOPE_SYMBOL present in podman binary"
 
       - uses: actions/upload-artifact@v7
         with:
