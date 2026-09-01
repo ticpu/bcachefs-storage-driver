@@ -56,13 +56,13 @@ jobs:
 
           ( cd release && sha256sum -- * > SHA256SUMS )
 
-      # Notes carry the exact filenames just built, so the install snippets never
-      # drift from the assets. Generated from dist/, not hand-maintained.
+      # Install goes through apt.ticpu.net and the AUR, so the notes name no
+      # filenames. dist/ is still read, to fail a release whose notes would
+      # describe a platform that produced nothing.
       - name: Generate release notes
         run: |
           set -euo pipefail
-          tag="${{ inputs.tag || github.ref_name }}"
-          .github/release-notes.sh "$tag" "${{ github.repository }}" dist > NOTES.md
+          .github/release-notes.sh dist > NOTES.md
           cat NOTES.md
 
       - name: Publish GitHub release

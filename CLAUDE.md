@@ -131,16 +131,23 @@ driver and overrides the config back — that is what `User-selected graph drive
 "overlay" overwritten by ... from database` means. It is podman reporting that the
 config lost.
 
-## Debian/Ubuntu: hold the packages
+## Debian/Ubuntu: version ordering does not protect these packages
 
-`apt-mark hold podman podman-docker` after installing. The `+bcachefs1` suffix
-only outranks the archive while the base version matches; a later archive revision
-(`5.7.0+ds2-3build2` vs `...-3build1+bcachefs1`) sorts *above* it, and an unheld
-upgrade silently installs an unpatched podman, which then refuses to start against
-a `bcachefs` storage.conf. To take a security update, rebuild the new version
-through the Containerfiles — they re-derive from `apt-get source podman` and pick
-the new version up automatically. Never unhold and let apt install the archive
-package.
+The `+bcachefs1` suffix only outranks the archive while the base version matches;
+a later archive revision (`5.7.0+ds2-3build2` vs `...-3build1+bcachefs1`) sorts
+*above* it, and an upgrade then silently installs an unpatched podman, which
+refuses to start against a `bcachefs` storage.conf.
+
+[apt.ticpu.net](https://github.com/ticpu/apt-ticpu-net) closes this: its
+`ticpu-archive-keyring` package ships an `/etc/apt/preferences.d/` pin at priority
+1001, so this origin wins regardless of version. A hand-installed deb has no pin
+and still needs `apt-mark hold`.
+
+Releases feed the archive: after `sign-release.sh`, run
+`./ingest.sh bcachefs-storage-driver <tag>` there. `release.yml` emits a
+`manifest.json` naming each deb's suite, which is what ingest reads — the
+per-distro podman builds carry that distro's own upstream version, so no filename
+pattern can tell a noble build from a trixie one.
 
 ## Checking upstream
 

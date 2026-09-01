@@ -1,125 +1,67 @@
 #!/bin/bash
 set -euo pipefail
 
-# Generate release notes with the exact filenames of the packages that were just
-# built. Names carry upstream versions and change every bump, so they are read
-# back out of the artifact directories rather than hand-maintained.
+# Generate release notes. Installation goes through apt.ticpu.net and the AUR,
+# so the notes no longer carry per-file curl lines; the artifact directories are
+# still read to prove every platform produced packages, since a release whose
+# notes describe packages that were never built is worse than a failed build.
 #
-# Usage: release-notes.sh <tag> <owner/repo> <dist-dir> > NOTES.md
+# Usage: release-notes.sh <dist-dir> > NOTES.md
 #
 # <dist-dir> holds one subdirectory per upload-artifact name: arch-pkgs/,
 # noble-debs/, resolute-debs/, trixie-debs/.
 
-[[ $# -eq 3 ]] || { echo "usage: release-notes.sh <tag> <owner/repo> <dist-dir>" >&2; exit 2; }
+[[ $# -eq 1 ]] || { echo "usage: release-notes.sh <dist-dir>" >&2; exit 2; }
 
-tag="$1"
-repo="$2"
-dist="$3"
-base="https://github.com/$repo/releases/download/$tag"
+dist="$1"
 
-# Print the basenames matching a glob, one per line. Errors out rather than
-# emitting nothing: a release whose install script silently lists no packages is
-# worse than a failed build.
-pick() {
-    local dir="$1" desc="$2"
-    shift 2
-    local found=() f
-    for f in "$@"; do
-        [[ -e $f ]] && found+=("$(basename "$f")")
-    done
-    if [[ ${#found[@]} -eq 0 ]]; then
-        echo "no $desc packages found in $dir" >&2
-        exit 1
-    fi
-    printf '%s\n' "${found[@]}" | sort
-}
-
-# The version glob keeps podman-bcachefs-debug out of the install list.
-mapfile -t arch < <(pick "$dist/arch-pkgs" arch \
-    "$dist"/arch-pkgs/podman-bcachefs-[0-9]*.pkg.tar.zst \
-    "$dist"/arch-pkgs/podman-docker-bcachefs-[0-9]*.pkg.tar.zst)
-
-# podman-remote and containers-storage are extra CLIs, and the -dev deb is
-# build-time only -- the driver is linked into podman itself. Install just what
-# a container host needs.
-mapfile -t noble < <(pick "$dist/noble-debs" noble \
-    "$dist"/noble-debs/podman_*.deb "$dist"/noble-debs/podman-docker_*.deb)
-mapfile -t resolute < <(pick "$dist/resolute-debs" resolute \
-    "$dist"/resolute-debs/podman_*.deb "$dist"/resolute-debs/podman-docker_*.deb)
-mapfile -t trixie < <(pick "$dist/trixie-debs" trixie \
-    "$dist"/trixie-debs/podman_*.deb "$dist"/trixie-debs/podman-docker_*.deb)
-
-curl_lines() {
+require() {
+    local dir="$1"
+    shift
     local f
     for f in "$@"; do
-        printf 'curl -fLO %s/%s\n' "$base" "$f"
+        [[ -e $f ]] && return 0
     done
+    echo "no packages found in $dir" >&2
+    exit 1
 }
 
-# "./a.deb ./b.deb" with no trailing space.
-local_paths() {
-    local joined
-    joined="$(printf './%s ' "$@")"
-    echo "${joined% }"
-}
-
-deb_section() {
-    local name="$1"
-    shift
-    cat <<EOF
-### $name
-
-\`\`\`bash
-$(curl_lines SHA256SUMS "$@")
-
-sha256sum --ignore-missing -c SHA256SUMS
-sudo dpkg -i $(local_paths "$@")
-sudo apt-get -f install
-sudo apt-mark hold podman podman-docker
-\`\`\`
-EOF
-}
+require "$dist/arch-pkgs" "$dist"/arch-pkgs/podman-bcachefs-[0-9]*.pkg.tar.zst
+require "$dist/noble-debs" "$dist"/noble-debs/podman_*.deb
+require "$dist/resolute-debs" "$dist"/resolute-debs/podman_*.deb
+require "$dist/trixie-debs" "$dist"/trixie-debs/podman_*.deb
 
 cat <<EOF
 bcachefs-enabled podman + containers/storage packages.
 
-The driver is registered at compile time, so podman must be *recompiled* against
-the patched storage — installing a patched storage library alone does nothing.
-Each binary here was checked for the driver symbol by the pipeline that built it.
+The driver is registered at compile time, so podman must be *recompiled* against the patched storage — installing a patched storage library alone does nothing. Each binary here was checked for the driver symbol by the pipeline that built it.
 
 ## Install
 
-### Arch Linux
-
-\`podman-bcachefs\` provides/conflicts \`podman\`, so pacman will offer to replace an
-existing podman. Answer yes; the package name differs precisely so that a later
-\`pacman -Syu\` cannot silently swap the driver back out.
+### Debian 13, Ubuntu 24.04, Ubuntu 26.04
 
 \`\`\`bash
-$(curl_lines SHA256SUMS "${arch[@]}")
-
-sha256sum --ignore-missing -c SHA256SUMS
-sudo pacman -U $(local_paths "${arch[@]}")
+curl -fsSLO https://apt.ticpu.net/ticpu-archive-keyring.deb
+sudo dpkg -i ticpu-archive-keyring.deb
+sudo apt-get update
+sudo apt-get install podman podman-docker
 \`\`\`
 
-The package ships \`/etc/containers/storage.conf.d/00-storage-arch.conf\`, which sets
-\`driver_priority\`. That picks bcachefs for a graphroot with no prior driver
-directory — a store already carrying \`overlay/\` keeps overlay. Set
-\`driver = "bcachefs"\` in \`storage.conf\` to move an existing one.
+The keyring package registers the suite matching your release and pins podman to the archive at priority 1001, so a later archive revision cannot replace it with a build that has no bcachefs driver. Earlier releases told you to \`apt-mark hold\`; that is no longer needed, and an existing hold can be dropped with \`sudo apt-mark unhold podman podman-docker\`.
 
-$(deb_section 'Ubuntu 24.04 (Noble)' "${noble[@]}")
+### Arch Linux
 
-$(deb_section 'Ubuntu 26.04 (Resolute)' "${resolute[@]}")
+\`\`\`bash
+paru -S podman-bcachefs-bin
+\`\`\`
 
-$(deb_section 'Debian 13 (Trixie)' "${trixie[@]}")
+\`podman-bcachefs\` provides/conflicts \`podman\`, so pacman will offer to replace an existing podman. Answer yes; the package name differs precisely so that a later \`pacman -Syu\` cannot silently swap the driver back out.
 
-The \`apt-mark hold\` is not optional. A later archive revision sorts *above* our
-\`+bcachefs1\` suffix, so an unheld upgrade silently installs an unpatched podman,
-which then refuses to start against a \`bcachefs\` storage.conf. To take a security
-update, rebuild the new version from the repository's Containerfiles instead of
-unholding.
+The package ships \`/etc/containers/storage.conf.d/00-storage-arch.conf\`, which sets \`driver_priority\`. That picks bcachefs for a graphroot with no prior driver directory — a store already carrying \`overlay/\` keeps overlay. Set \`driver = "bcachefs"\` in \`storage.conf\` to move an existing one.
 
-On Debian and Ubuntu, point podman at bcachefs in \`/etc/containers/storage.conf\`:
+## Point podman at bcachefs
+
+On Debian and Ubuntu, in \`/etc/containers/storage.conf\`:
 
 \`\`\`toml
 [storage]
@@ -127,12 +69,11 @@ driver = "bcachefs"
 graphroot = "/var/lib/containers/storage"
 \`\`\`
 
-The graphroot must be on a bcachefs filesystem; the driver refuses to initialize
-otherwise.
+The graphroot must be on a bcachefs filesystem; the driver refuses to initialize otherwise.
 
-## Optional extras
+## Direct downloads
 
-\`podman-remote\` and \`containers-storage\` are additional CLIs, not needed on a
-container host. \`golang-github-containers-storage-dev\` is build-time only — the
-driver is linked into podman itself, so installing it changes nothing at runtime.
+Every asset below is detach-signed; verify with \`gpg --verify <file>.asc <file>\` against key \`E5998E49DC9E1DCFDB9B46EC77EBA10790CFFCCD\`, or check \`SHA256SUMS\`. \`manifest.json\` names the suite each \`.deb\` was built for.
+
+\`podman-remote\` and \`containers-storage\` are additional CLIs, not needed on a container host. \`golang-github-containers-storage-dev\` is build-time only — the driver is linked into podman itself, so installing it changes nothing at runtime.
 EOF

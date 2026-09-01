@@ -78,33 +78,44 @@ podman build -f packaging/resolute/Containerfile.podman  -o out/resolute/ .
 sudo dpkg -i out/resolute/podman_*+bcachefs1_*.deb
 ```
 
-On Debian/Ubuntu, `apt-mark hold podman podman-docker` afterwards. The
+A hand-installed deb needs `apt-mark hold podman podman-docker` afterwards. The
 `+bcachefs1` suffix only outranks the archive while the base version matches; a
 later archive revision sorts above it and an unheld upgrade silently installs an
 unpatched podman, which then refuses to start against a `bcachefs` storage.conf.
-To take a security update, rebuild the new version through the Containerfiles
-(they re-derive from `apt-get source podman`) rather than unholding.
+The package repository below removes that requirement — it pins these packages
+to its own origin, so version ordering no longer decides.
 
 ### Prebuilt packages
 
-Tagged releases carry prebuilt `.deb` (Noble, Resolute, Trixie) and
-`.pkg.tar.zst` (Arch) packages with a `SHA256SUMS`, built and driver-verified by
-the same pipeline that gates CI. Every asset is detach-signed; verify one with
-`gpg --verify <asset>.asc <asset>` against key
-`E5998E49DC9E1DCFDB9B46EC77EBA10790CFFCCD`. Releases are versioned for this
-repository, not for podman — one release spans every distro, each carrying a
-different podman version. Cutting one is a tag push followed by a local signing
-pass, which is also what makes the release public:
+Debian 13, Ubuntu 24.04 and Ubuntu 26.04:
+
+```bash
+curl -fsSLO https://apt.ticpu.net/ticpu-archive-keyring.deb
+sudo dpkg -i ticpu-archive-keyring.deb
+sudo apt-get update
+sudo apt-get install podman podman-docker
+```
+
+Arch:
+
+```bash
+paru -S podman-bcachefs-bin
+```
+
+Both are built and driver-verified by the same pipeline that gates CI, and both
+come from the tagged releases here, which also publish the raw `.deb` and
+`.pkg.tar.zst` with a `SHA256SUMS`. Every asset is detach-signed; verify one
+with `gpg --verify <asset>.asc <asset>` against key
+`E5998E49DC9E1DCFDB9B46EC77EBA10790CFFCCD`.
+
+Releases are versioned for this repository, not for podman — one release spans
+every distro, each carrying a different podman version. Cutting one is a tag
+push followed by a local signing pass, which is also what makes the release
+public, and then an ingest into the archive:
 
 ```bash
 git tag -s v1.1.0 -m 'podman 6.0.1 for Arch' && git push --tags
 ./sign-release.sh v1.1.0
-```
-
-Arch users can take the Arch package from the AUR instead of building it:
-
-```bash
-paru -S podman-bcachefs-bin
 ```
 
 Enable it in `/etc/containers/storage.conf`:
