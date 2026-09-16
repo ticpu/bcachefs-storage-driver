@@ -39,8 +39,8 @@ patched storage library is not enough — podman must be recompiled against it.*
 | Ubuntu 24.04 (noble) | 1.51.0 | `github.com/containers/storage` | no | no |
 | Debian 13 (trixie) | 1.57.2 | `github.com/containers/storage` | no | no |
 | Ubuntu 26.04 (resolute) | 1.61.0 | `go.podman.io/storage` | yes | no |
-| Arch (podman 6.1.x) | 1.64.0 | `go.podman.io/storage` | yes | yes |
-| container-libs `main` | 1.64.0 | `go.podman.io/storage` | yes | yes |
+| Arch (podman 6.1.x) | 1.64.1 | `go.podman.io/storage` | yes | yes |
+| container-libs `main` | 1.64.1 | `go.podman.io/storage` | yes | yes |
 
 storage renamed its module to `go.podman.io/storage` at 1.60, so
 `apply-driver.sh --module` rewrites imports for the newer targets. Noble keeps
@@ -55,6 +55,11 @@ the build. Each lives in its own file under `driver/`, and `apply-driver.sh`
 installs it only if the target tree declares the method. Nothing has to be
 configured per distro — the target is asked, and either mistake is a compile
 error, never a silent misbuild.
+
+storage 1.64.1 also began normalizing the root ID inside a v3 security.capability
+xattr before layers are compared. That helper is unexported, so the full-tree
+diff reaches it through a one-function file and apply-driver.sh installs either
+the normalizing or the pass-through variant, again by asking the target.
 
 ## Building
 

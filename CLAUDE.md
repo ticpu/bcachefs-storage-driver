@@ -60,6 +60,13 @@ The target is the authority, so there is no per-distro flag to keep in sync, and
 either mistake is a loud compile error (missing method → does not satisfy
 `ProtoDriver`; stray method → undefined type or package).
 
+The same question is asked of `pkg/archive/archive.go` for
+`normalizeCapabilityRootID`, which arrived in 1.64.1 and maps the root ID inside a
+v3 `security.capability` xattr into the container's ID space. It is unexported, so
+`changes_full.go` calls it through `capability_normalize.go`, and a target without
+it gets `capability_raw.go` instead. Exactly one of that pair installs — unlike the
+optional methods, a missing file is an error in both branches.
+
 Everything the driver stubs out is a no-op with the right shape: `Dedup()` →
 empty `DedupResult`, `DeferredRemove()` → delegates to `Remove()`,
 `GetTempDirRootDirs()` → empty slice. The interface keeps growing; a build
@@ -169,7 +176,8 @@ refuses to start against a `bcachefs` storage.conf.
 and still needs `apt-mark hold`.
 
 Releases feed the archive: after `sign-release.sh`, run
-`./ingest.sh bcachefs-storage-driver <tag>` there. `release.yml` emits a
+`./ingest.sh bcachefs-storage-driver <tag>` there. A `-arch` tag publishes no debs,
+so it has nothing to ingest. `release.yml` emits a
 `manifest.json` naming each deb's suite, which is what ingest reads — the
 per-distro podman builds carry that distro's own upstream version, so no filename
 pattern can tell a noble build from a trixie one.
@@ -241,6 +249,12 @@ catches API drift like `SyncMode`.
 The vet job resolves the *newest* released storage tag at run time rather than
 pinning one, so upstream API drift turns CI red on the next run instead of on the
 next distro bump.
+
+A tag ending in `-arch` publishes the Arch packages and Arch instructions alone.
+That is for a podman bump the distro archives have not followed: the debs would be
+byte-for-byte what the last release already carries, and apt.ticpu.net would ingest
+a second copy of them. The build still covers every target — only the publish step
+reads the scope.
 
 Cut a release with a signed tag; the workflow rebuilds, re-verifies the driver
 symbol, and uploads the packages with a `SHA256SUMS` as a **draft**.
