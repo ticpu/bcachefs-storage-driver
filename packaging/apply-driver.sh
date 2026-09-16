@@ -33,7 +33,7 @@ driver="$2"
 linux="$src/drivers/driver_linux.go"
 generic="$src/drivers/driver.go"
 
-for f in "$linux" "$generic" "$driver/bcachefs.go"; do
+for f in "$linux" "$generic" "$src/pkg/archive/archive.go" "$driver/bcachefs.go"; do
     [[ -f "$f" ]] || { echo "missing $f" >&2; exit 1; }
 done
 
@@ -75,11 +75,24 @@ else
     echo "apply-driver: storage has no DeferredRemove, omitting deferredremove.go"
 fi
 
+# A v3 security.capability xattr carries the root ID of the mapping it was
+# written under, so comparing it raw makes an unchanged file look modified
+# across differently mapped layers. storage normalizes it from 1.64.1; older
+# trees have no such helper, so exactly one of the pair compiles.
+capability=capability_raw.go
+if grep -qF 'func normalizeCapabilityRootID(' "$src/pkg/archive/archive.go"; then
+    capability=capability_normalize.go
+fi
+[[ -f "$driver/$capability" ]] || { echo "missing $driver/$capability" >&2; exit 1; }
+echo "apply-driver: installing $capability"
+install -m 0644 "$driver/$capability" "$src/pkg/archive/"
+
 # storage >= 1.60 renamed the module to go.podman.io/storage
 if [[ -n "$module" && "$module" != "github.com/containers/storage" ]]; then
     find "$src/drivers/bcachefs" \
          "$src/drivers/register/register_bcachefs.go" \
          "$src/pkg/archive/changes_full.go" \
+         "$src/pkg/archive/$capability" \
          -name '*.go' -exec sed -i "s|github.com/containers/storage|$module|g" {} +
 fi
 
