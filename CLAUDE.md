@@ -13,6 +13,7 @@ Upstream PR: containers/container-libs#518.
 driver/                     canonical driver (storage >= 1.57)
 driver/syncmode.go          SyncMode(), applied only to storage >= 1.63
 driver/deferredremove.go    DeferredRemove(), applied only to storage >= 1.59
+driver/changes_full*.go     full-tree diff, one variant per walker generation
 packaging/apply-driver.sh   overlays driver/ onto an unpacked storage tree
 packaging/patches/          distro patches that are not about the driver
 packaging/arch/             PKGBUILD + storage.conf.d drop-in
@@ -60,12 +61,13 @@ The target is the authority, so there is no per-distro flag to keep in sync, and
 either mistake is a loud compile error (missing method → does not satisfy
 `ProtoDriver`; stray method → undefined type or package).
 
-The same question is asked of `pkg/archive/archive.go` for
-`normalizeCapabilityRootID`, which arrived in 1.64.1 and maps the root ID inside a
-v3 `security.capability` xattr into the container's ID space. It is unexported, so
-`changes_full.go` calls it through `capability_normalize.go`, and a target without
-it gets `capability_raw.go` instead. Exactly one of that pair installs — unlike the
-optional methods, a missing file is an error in both branches.
+The full-tree diff is chosen the same way, by grepping the target's
+`pkg/archive/changes_linux.go` for the `*os.Root` form of `walkchunk`. Where it
+exists — 1.64.1 and up — `changes_full_linux.go` registers entries through it and
+inherits the xattr, symlink and capability-root-ID handling instead of repeating
+it. Older targets get `changes_full.go`, which walks absolute paths and predates
+both that walker and the os.Root API. Exactly one of the pair installs, so unlike
+the optional methods a missing file is an error in either branch.
 
 Everything the driver stubs out is a no-op with the right shape: `Dedup()` →
 empty `DedupResult`, `DeferredRemove()` → delegates to `Remove()`,
@@ -198,9 +200,11 @@ read-only and needs no checkout of the distro trees.
 2. **Anchor drift.** `apply-driver.sh` prints which optional files it installed
    and hard-errors if a `driver_linux.go` anchor stopped matching, so step 1
    covers it.
-3. **`changes_full.go` drift.** It mirrors `walkchunk` in
-   `pkg/archive/changes_linux.go`; upstream churn there is invisible to the
-   compiler. Read both when upstream touches `pkg/archive`.
+3. **`changes_full.go` drift.** The legacy variant mirrors the pre-1.64.1
+   `walkchunk` in `pkg/archive/changes_linux.go`; upstream churn there is
+   invisible to the compiler. Read both when upstream touches `pkg/archive`.
+   `changes_full_linux.go` calls that walkchunk instead, so the compiler covers
+   it.
 4. **Distro versions.** `curl -sS 'https://sources.debian.org/api/src/<pkg>/'`
    for Debian and Ubuntu source versions (`podman`,
    `golang-github-containers-storage`); `gh api repos/podman-container-tools/podman/releases/latest`
@@ -220,8 +224,8 @@ read-only and needs no checkout of the distro trees.
   Every call is followed by `runtime.KeepAlive` on the path buffers.
 - **COW-aware diff.** Stock `ChangesDirs` prunes subtrees whose inode numbers
   match between layers. On a CoW filesystem a snapshot *shares* inode numbers with
-  its parent, so that pruning silently skips modified subtrees. `changes_full.go`
-  walks both trees completely, comparing symlink targets and xattrs.
+  its parent, so that pruning silently skips modified subtrees. The full-tree
+  diff walks both trees completely, comparing symlink targets and xattrs.
 - Reference implementation for the driver shape: `drivers/btrfs/btrfs.go`.
 
 ## Testing

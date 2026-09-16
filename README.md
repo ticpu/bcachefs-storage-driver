@@ -56,10 +56,12 @@ installs it only if the target tree declares the method. Nothing has to be
 configured per distro — the target is asked, and either mistake is a compile
 error, never a silent misbuild.
 
-storage 1.64.1 also began normalizing the root ID inside a v3 security.capability
-xattr before layers are compared. That helper is unexported, so the full-tree
-diff reaches it through a one-function file and apply-driver.sh installs either
-the normalizing or the pass-through variant, again by asking the target.
+The full-tree diff ships in two variants for the same reason. From storage 1.64.1
+its walker takes an `*os.Root` and normalizes the root ID inside v3
+security.capability xattrs, so the diff can register entries through that walker
+and inherit both; older trees get the standalone version, whose Go toolchains
+also predate the os.Root API. apply-driver.sh asks the target which one to
+install.
 
 ## Building
 
@@ -180,7 +182,7 @@ deletion, root and rootless, and the full graphdriver lifecycle
 **COW-aware diff.** The stock `ChangesDirs` prunes subtrees whose inode numbers
 match between the old and new layer. On a CoW filesystem a snapshot *shares*
 inode numbers with its parent, so that pruning silently skips modified
-subtrees. `changes_full.go` walks both trees completely, comparing symlink
+subtrees. The full-tree diff walks both trees completely, comparing symlink
 targets and xattrs.
 
 **Subvolume lifecycle** goes through `BCH_IOCTL_SUBVOLUME_CREATE` /
@@ -240,4 +242,4 @@ Disable it, `podman rmi` the broken image, re-pull.
 ## License
 
 Apache-2.0, matching containers/storage, from which `bcachefs.go` (modeled on
-`btrfs.go`) and `changes_full.go` derive.
+`btrfs.go`) and the full-tree diff derive.

@@ -100,12 +100,8 @@ func collectFileInfoFull(sourceDir string, idMappings *idtools.IDMappings) (*Fil
 
 		info.stat = s
 
-		capability, err := system.Lgetxattr(path, "security.capability")
+		info.capability, err = system.Lgetxattr(path, "security.capability")
 		if err != nil && !errors.Is(err, system.EOPNOTSUPP) {
-			return err
-		}
-		info.capability, err = fullCapability(idMappings, capability)
-		if err != nil {
 			return err
 		}
 

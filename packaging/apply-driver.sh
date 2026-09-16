@@ -33,14 +33,13 @@ driver="$2"
 linux="$src/drivers/driver_linux.go"
 generic="$src/drivers/driver.go"
 
-for f in "$linux" "$generic" "$src/pkg/archive/archive.go" "$driver/bcachefs.go"; do
+for f in "$linux" "$generic" "$src/pkg/archive/changes_linux.go" "$driver/bcachefs.go"; do
     [[ -f "$f" ]] || { echo "missing $f" >&2; exit 1; }
 done
 
 install -d "$src/drivers/bcachefs"
 install -m 0644 "$driver/bcachefs.go" "$driver/dummy_unsupported.go" "$src/drivers/bcachefs/"
 install -m 0644 "$driver/register_bcachefs.go" "$src/drivers/register/"
-install -m 0644 "$driver/changes_full.go" "$src/pkg/archive/"
 
 if [[ $strip_tests -eq 0 ]]; then
     install -m 0644 "$driver/bcachefs_test.go" "$src/drivers/bcachefs/"
@@ -75,24 +74,23 @@ else
     echo "apply-driver: storage has no DeferredRemove, omitting deferredremove.go"
 fi
 
-# A v3 security.capability xattr carries the root ID of the mapping it was
-# written under, so comparing it raw makes an unchanged file look modified
-# across differently mapped layers. storage normalizes it from 1.64.1; older
-# trees have no such helper, so exactly one of the pair compiles.
-capability=capability_raw.go
-if grep -qF 'func normalizeCapabilityRootID(' "$src/pkg/archive/archive.go"; then
-    capability=capability_normalize.go
+# storage 1.64.1 rewrote its walker to take an *os.Root and normalize the root ID
+# inside v3 security.capability xattrs. Where that walkchunk exists the full-tree
+# diff reuses it and inherits both; older trees get the standalone walker, which
+# predates the os.Root API their Go toolchains may not have either.
+full=changes_full.go
+if grep -qF 'func walkchunk(root *os.Root' "$src/pkg/archive/changes_linux.go"; then
+    full=changes_full_linux.go
 fi
-[[ -f "$driver/$capability" ]] || { echo "missing $driver/$capability" >&2; exit 1; }
-echo "apply-driver: installing $capability"
-install -m 0644 "$driver/$capability" "$src/pkg/archive/"
+[[ -f "$driver/$full" ]] || { echo "missing $driver/$full" >&2; exit 1; }
+echo "apply-driver: installing $full"
+install -m 0644 "$driver/$full" "$src/pkg/archive/"
 
 # storage >= 1.60 renamed the module to go.podman.io/storage
 if [[ -n "$module" && "$module" != "github.com/containers/storage" ]]; then
     find "$src/drivers/bcachefs" \
          "$src/drivers/register/register_bcachefs.go" \
-         "$src/pkg/archive/changes_full.go" \
-         "$src/pkg/archive/$capability" \
+         "$src/pkg/archive/$full" \
          -name '*.go' -exec sed -i "s|github.com/containers/storage|$module|g" {} +
 fi
 
