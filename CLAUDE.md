@@ -293,7 +293,8 @@ cd ~/GIT/apt-ticpu-net && ./ingest.sh bcachefs-storage-driver vX.Y.Z
 
 and the AUR `podman-bcachefs-bin`, in `~/.cache/paru/clone/podman-bcachefs-bin/`:
 bump `pkgver` to the new podman version and `_reltag` to the new tag, put the
-artifact's sha256 from the release's `SHA256SUMS` in `sha256sums[0]`,
+x86_64 and aarch64 artifacts' sha256 from the release's `SHA256SUMS` in
+`sha256sums_x86_64[0]` and `sha256sums_aarch64[0]`,
 `makepkg --printsrcinfo > .SRCINFO`, commit both and push. `_binrel` moves only
 if the Arch package's own `pkgrel` did. That package verifies the `.asc`, so a
 release left unsigned is one it cannot consume.
