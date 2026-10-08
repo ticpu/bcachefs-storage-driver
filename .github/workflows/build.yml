@@ -89,8 +89,16 @@ jobs:
           go build ./drivers/... ./pkg/archive/...
           go vet ./drivers/bcachefs/...
 
+  # Each suite builds natively on both arches. Arch:all debs ship from amd64
+  # only: arm64 rebuilds the same names, and two copies would collide in the release.
   noble:
-    runs-on: ubuntu-latest
+    strategy: &deb-arches
+      fail-fast: false
+      matrix:
+        include:
+          - {runner: ubuntu-latest, arch: amd64, upload: '*.deb'}
+          - {runner: ubuntu-24.04-arm, arch: arm64, upload: '*_arm64.deb'}
+    runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v7
 
@@ -124,7 +132,7 @@ jobs:
       - name: Verify bcachefs is linked into the podman binary
         run: |
           set -euo pipefail
-          deb=$(ls out/noble/podman_*+bcachefs1_amd64.deb)
+          deb=$(ls out/noble/podman_*+bcachefs1_${{ matrix.arch }}.deb)
           dpkg-deb --fsys-tarfile "$deb" | tar -xO ./usr/bin/podman > /tmp/podman-bin
           grep -qaF "${DRIVER_SYMBOL:?}" /tmp/podman-bin \
             || { echo "bcachefs driver not linked into $deb"; exit 1; }
@@ -132,11 +140,12 @@ jobs:
 
       - uses: actions/upload-artifact@v7
         with:
-          name: noble-debs
-          path: out/noble/*.deb
+          name: noble-${{ matrix.arch }}-debs
+          path: out/noble/${{ matrix.upload }}
 
   resolute:
-    runs-on: ubuntu-latest
+    strategy: *deb-arches
+    runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v7
 
@@ -152,7 +161,7 @@ jobs:
       - name: Verify bcachefs and the auth-scope fix are linked into podman
         run: |
           set -euo pipefail
-          deb=$(ls out/resolute/podman_*+bcachefs2_amd64.deb)
+          deb=$(ls out/resolute/podman_*+bcachefs2_${{ matrix.arch }}.deb)
           dpkg-deb --fsys-tarfile "$deb" | tar -xO ./usr/bin/podman > /tmp/podman-bin
           grep -qaF "${DRIVER_SYMBOL:?}" /tmp/podman-bin \
             || { echo "bcachefs driver not linked into $deb"; exit 1; }
@@ -162,11 +171,12 @@ jobs:
 
       - uses: actions/upload-artifact@v7
         with:
-          name: resolute-debs
-          path: out/resolute/*.deb
+          name: resolute-${{ matrix.arch }}-debs
+          path: out/resolute/${{ matrix.upload }}
 
   trixie:
-    runs-on: ubuntu-latest
+    strategy: *deb-arches
+    runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v7
 
@@ -199,7 +209,7 @@ jobs:
       - name: Verify bcachefs and the auth-scope fix are linked into podman
         run: |
           set -euo pipefail
-          deb=$(ls out/trixie/podman_*+bcachefs2_amd64.deb)
+          deb=$(ls out/trixie/podman_*+bcachefs2_${{ matrix.arch }}.deb)
           dpkg-deb --fsys-tarfile "$deb" | tar -xO ./usr/bin/podman > /tmp/podman-bin
           grep -qaF "${DRIVER_SYMBOL:?}" /tmp/podman-bin \
             || { echo "bcachefs driver not linked into $deb"; exit 1; }
@@ -209,13 +219,21 @@ jobs:
 
       - uses: actions/upload-artifact@v7
         with:
-          name: trixie-debs
-          path: out/trixie/*.deb
+          name: trixie-${{ matrix.arch }}-debs
+          path: out/trixie/${{ matrix.upload }}
 
+  # docker.io/library/archlinux is x86_64-only; this image carries both Arch and
+  # Arch Linux ARM under one tag.
   arch:
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {runner: ubuntu-latest, carch: x86_64}
+          - {runner: ubuntu-24.04-arm, carch: aarch64}
+    runs-on: ${{ matrix.runner }}
     container:
-      image: docker.io/library/archlinux:base-devel
+      image: ghcr.io/ticpu/docker-archlinux-paru:latest
     steps:
       - name: Install build dependencies
         run: |
@@ -237,12 +255,15 @@ jobs:
       #
       # --skippgpcheck: the release keys are not in the container keyring.
       # Source integrity is still enforced by the pinned sha512/b2sums.
+      #
+      # PKGEXT: Arch Linux ARM's makepkg.conf defaults to .pkg.tar.xz; the release
+      # and the AUR -bin package expect .pkg.tar.zst on both arches.
       - name: Build podman-bcachefs package
         run: |
           set -euo pipefail
           useradd --create-home builder
           chown -R builder:builder .
-          su builder -c 'cd packaging/arch && makepkg -f --noconfirm --skippgpcheck --nocheck'
+          su builder -c 'cd packaging/arch && PKGEXT=.pkg.tar.zst makepkg -f --noconfirm --skippgpcheck --nocheck'
 
       - name: Report container-libs skew (non-fatal)
         run: |
@@ -264,9 +285,9 @@ jobs:
           bsdtar -xOf "$pkg" usr/bin/podman > /tmp/podman-bin
           grep -qaF "${DRIVER_SYMBOL:?}" /tmp/podman-bin \
             || { echo "bcachefs driver not linked into $pkg"; exit 1; }
-          echo "arch: $DRIVER_SYMBOL present in podman binary"
+          echo "arch ${{ matrix.carch }}: $DRIVER_SYMBOL present in podman binary"
 
       - uses: actions/upload-artifact@v7
         with:
-          name: arch-pkgs
+          name: arch-${{ matrix.carch }}-pkgs
           path: packaging/arch/*.pkg.tar.zst

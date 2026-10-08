@@ -8,8 +8,8 @@ set -euo pipefail
 #
 # Usage: release-notes.sh <dist-dir> [all|arch] > NOTES.md
 #
-# <dist-dir> holds one subdirectory per upload-artifact name: arch-pkgs/,
-# noble-debs/, resolute-debs/, trixie-debs/. The scope names which of them the
+# <dist-dir> holds one subdirectory per upload-artifact name:
+# arch-<carch>-pkgs/ and <suite>-<arch>-debs/. The scope names which of them the
 # release publishes; the others are built and verified but not shipped.
 
 [[ $# -ge 1 && $# -le 2 ]] || { echo "usage: release-notes.sh <dist-dir> [all|arch]" >&2; exit 2; }
@@ -33,12 +33,16 @@ require() {
     exit 1
 }
 
-require "$dist/arch-pkgs" "$dist"/arch-pkgs/podman-bcachefs-[0-9]*.pkg.tar.zst
+for carch in x86_64 aarch64; do
+    require "$dist/arch-$carch-pkgs" "$dist/arch-$carch-pkgs"/podman-bcachefs-[0-9]*-"$carch".pkg.tar.zst
+done
 
 if [[ $scope == all ]]; then
-    require "$dist/noble-debs" "$dist"/noble-debs/podman_*.deb
-    require "$dist/resolute-debs" "$dist"/resolute-debs/podman_*.deb
-    require "$dist/trixie-debs" "$dist"/trixie-debs/podman_*.deb
+    for suite in noble resolute trixie; do
+        for arch in amd64 arm64; do
+            require "$dist/$suite-$arch-debs" "$dist/$suite-$arch-debs"/podman_*_"$arch".deb
+        done
+    done
 fi
 
 cat <<EOF

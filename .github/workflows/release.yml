@@ -26,8 +26,8 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      # Every artifact from the reusable build workflow (noble-debs,
-      # resolute-debs, trixie-debs, arch-pkgs), each under its own subdirectory.
+      # Every artifact from the reusable build workflow (<suite>-<arch>-debs,
+      # arch-<carch>-pkgs), each under its own subdirectory.
       - uses: actions/download-artifact@v8
         with:
           path: dist
@@ -51,9 +51,9 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p release
-          if [ "$SCOPE" = arch ]; then from=dist/arch-pkgs; else from=dist; fi
+          if [ "$SCOPE" = arch ]; then from=(dist/arch-*-pkgs); else from=(dist); fi
           # Debug/dbgsym packages are large and rarely wanted in a release.
-          find "$from" -type f \( -name '*.deb' -o -name '*.pkg.tar.zst' \) \
+          find "${from[@]}" -type f \( -name '*.deb' -o -name '*.pkg.tar.zst' \) \
             ! -name '*debug*' ! -name '*dbgsym*' -exec cp -t release {} +
 
           count=$(find release -type f | wc -l)
@@ -66,7 +66,7 @@ jobs:
           # filenames cannot be told apart; only the artifact directory knows.
           if [ "$SCOPE" = all ]; then
             find dist -type f -name '*.deb' ! -name '*debug*' ! -name '*dbgsym*' -printf '%h\t%f\n' \
-              | sed -E 's|^dist/([^/-]+)-debs\t|\1\t|' \
+              | sed -E 's|^dist/([^/-]+)-[^/]+-debs\t|\1\t|' \
               | jq -Rn '[inputs | split("\t") | {file: .[1], suite: .[0]}]' > release/manifest.json
             # all/1 iterates already; all(.[].suite | ...) would index each element twice.
             jq -e 'length > 0 and all(.suite | test("^[a-z]+$"))' release/manifest.json > /dev/null

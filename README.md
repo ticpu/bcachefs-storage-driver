@@ -42,6 +42,8 @@ patched storage library is not enough — podman must be recompiled against it.*
 | Arch (podman 6.1.x) | 1.64.1 | `go.podman.io/storage` | yes | yes |
 | container-libs `main` | 1.64.1 | `go.podman.io/storage` | yes | yes |
 
+Every target ships for x86_64 and aarch64; Arch's aarch64 build is Arch Linux ARM.
+
 storage renamed its module to `go.podman.io/storage` at 1.60, so
 `apply-driver.sh --module` rewrites imports for the newer targets. Noble keeps
 its own copy under `packaging/noble/driver/`: its `archive.FileInfo` has no

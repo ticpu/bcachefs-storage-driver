@@ -250,6 +250,13 @@ resolute, trixie, arch). **A tag builds every distro, on purpose** — `driver/`
 a shared change did not break the ones you were not thinking about. That is what
 catches API drift like `SyncMode`.
 
+Each distro job is a matrix over `ubuntu-latest` and `ubuntu-24.04-arm`, building
+natively — the Containerfiles never name an arch. Arch:all debs are uploaded from
+amd64 only; arm64 rebuilds the same filenames, and `cp` into `release/` would let
+one silently clobber the other. Arch runs in `ghcr.io/ticpu/docker-archlinux-paru`,
+which carries Arch Linux ARM for aarch64; `docker.io/library/archlinux` is
+x86_64-only.
+
 The vet job resolves the *newest* released storage tag at run time rather than
 pinning one, so upstream API drift turns CI red on the next run instead of on the
 next distro bump.
